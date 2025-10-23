@@ -28,9 +28,10 @@ var t_sampler: sampler;
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // TEMP: Return solid bright green to test if shader is working at all
-    return vec4<f32>(0.0, 1.0, 0.0, 1.0);
-    
+    // TEMP: Return solid bright red to test if shader is working at all
+    // Using red instead of green to rule out any color channel issues
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+
     // Original texture sampling (disabled for testing)
     // let color = textureSample(t_texture, t_sampler, input.tex_coords);
     // return color;

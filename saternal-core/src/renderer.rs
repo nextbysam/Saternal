@@ -64,21 +64,40 @@ impl<'a> Renderer<'a> {
             .await?;
 
         let size = window.inner_size();
+
+        // Get the preferred surface format and use it for both surface and texture
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps.formats.iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+
+        // Choose the best supported alpha mode
+        let alpha_mode = if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+            wgpu::CompositeAlphaMode::PostMultiplied
+        } else if surface_caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else {
+            surface_caps.alpha_modes[0] // Use first available
+        };
+
+        info!("Using surface format: {:?}, alpha mode: {:?}", surface_format, alpha_mode);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_capabilities(&adapter).formats[0],
+            format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo, // VSync
             desired_maximum_frame_latency: 2,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            alpha_mode,
             view_formats: vec![],
         };
 
         surface.configure(&device, &config);
 
         let font_manager = FontManager::new(font_family, font_size)?;
-        
+
         // Calculate cell dimensions
         let (cell_width, cell_height) = {
             let metrics = font_manager.font().horizontal_line_metrics(font_size).unwrap();
@@ -87,21 +106,21 @@ impl<'a> Renderer<'a> {
             (cell_width, cell_height)
         };
 
-        // Create texture for text rendering (RGBA)
-        // Size it to match the window/surface size so it fills the screen
+        // Create texture for text rendering using the SAME format as surface
+        // This is critical - texture and surface must have matching formats
         let texture_size = wgpu::Extent3d {
             width: size.width.max(1),
             height: size.height.max(1),
             depth_or_array_layers: 1,
         };
-        log::info!("Creating text texture: {}x{} (window size)", size.width, size.height);
+        info!("Creating text texture: {}x{} with format {:?}", size.width, size.height, surface_format);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Text Texture"),
             size: texture_size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: surface_format, // FIXED: Use same format as surface!
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -303,10 +322,11 @@ impl<'a> Renderer<'a> {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
+                            // TEMP: Use bright blue clear color to test if we can see ANYTHING
                             r: 0.0,
                             g: 0.0,
-                            b: 0.0,
-                            a: 0.95,
+                            b: 1.0,
+                            a: 1.0, // Full opacity
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -339,20 +359,34 @@ impl<'a> Renderer<'a> {
         let cols = term.columns();
         log::info!("Rendering terminal: {}x{} cells", cols, rows);
 
-        // Create RGBA buffer for the entire window/texture
+        // Create buffer for the entire window/texture
         let width = self.config.width;
         let height = self.config.height;
         log::debug!("Texture dimensions: {}x{} pixels (cell: {}x{})", width, height, self.cell_width, self.cell_height);
-        
+
+        // Determine if we need BGRA or RGBA based on surface format
+        let is_bgra = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+
         // TEMP: Fill entire screen with bright green to test pipeline
         let mut buffer = vec![0u8; (width * height * 4) as usize];
         for i in (0..buffer.len()).step_by(4) {
-            buffer[i] = 0;       // R
-            buffer[i + 1] = 255; // G - bright green
-            buffer[i + 2] = 0;   // B  
-            buffer[i + 3] = 255; // A - full opacity
+            if is_bgra {
+                buffer[i] = 0;       // B
+                buffer[i + 1] = 255; // G - bright green
+                buffer[i + 2] = 0;   // R
+                buffer[i + 3] = 255; // A - full opacity
+            } else {
+                buffer[i] = 0;       // R
+                buffer[i + 1] = 255; // G - bright green
+                buffer[i + 2] = 0;   // B
+                buffer[i + 3] = 255; // A - full opacity
+            }
         }
-        log::info!("Filled entire texture with bright green ({} pixels)", width * height);
+        log::info!("Filled entire texture with bright green ({} pixels, format: {:?}, BGRA: {})",
+                   width * height, self.config.format, is_bgra);
 
         // TEMP: Skip terminal rendering, just test solid color
         /*
@@ -436,35 +470,6 @@ impl<'a> Renderer<'a> {
                 depth_or_array_layers: 1,
             },
         );
-        
-        // ALWAYS update vertex buffer for fullscreen quad (even when testing)
-        #[repr(C)]
-        #[derive(Copy, Clone)]
-        struct Vertex {
-            position: [f32; 2],
-            tex_coords: [f32; 2],
-        }
-
-        let vertices = [
-            // Top-left triangle
-            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [-1.0, -1.0], tex_coords: [0.0, 1.0] },
-            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
-            // Bottom-right triangle
-            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
-            Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] },
-        ];
-
-        let vertex_data = unsafe {
-            std::slice::from_raw_parts(
-                vertices.as_ptr() as *const u8,
-                std::mem::size_of_val(&vertices),
-            )
-        };
-
-        log::debug!("Writing {} vertices ({} bytes) to vertex buffer", vertices.len(), vertex_data.len());
-        self.queue.write_buffer(&self.vertex_buffer, 0, vertex_data);
 
         Ok(())
     }

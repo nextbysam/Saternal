@@ -59,8 +59,12 @@ impl DropdownWindow {
         // but can receive key events when visible
         let () = msg_send![ns_window, setHidesOnDeactivate:NO];
 
-        // Enable vibrancy/blur effect
+        // Enable vibrancy/blur effect FIRST (so it's behind the Metal layer)
         self.enable_vibrancy(ns_window)?;
+
+        // Make window transparent so the Metal layer can render on top of vibrancy
+        let () = msg_send![ns_window, setOpaque:NO];
+        let () = msg_send![ns_window, setBackgroundColor:nil];
 
         info!("Configured dropdown window: {}x{} at ({}, {})",
               window_width, window_height, window_x, window_y);
