@@ -1,9 +1,9 @@
 use alacritty_terminal::{
     event::EventListener,
-    event_loop::Notifier,
     grid::Dimensions,
-    term::Term,
+    term::{Config as TermConfig, Term, TermSize},
     tty,
+    vte::ansi::Processor,
 };
 use anyhow::Result;
 use log::{debug, info};
@@ -14,7 +14,7 @@ use std::sync::Arc;
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventListener>>>,
     pty: Box<dyn tty::EventedPty>,
-    notifier: Notifier,
+    processor: Processor,
 }
 
 impl Terminal {
@@ -22,32 +22,36 @@ impl Terminal {
     pub fn new(cols: usize, rows: usize, shell: Option<String>) -> Result<Self> {
         info!("Creating new terminal: {}x{}", cols, rows);
 
-        // Create PTY
+        // Create PTY with WindowSize
         let pty_config = tty::Options {
             shell: shell.map(|s| tty::Shell::new(s, vec![])),
             working_directory: None,
             hold: false,
         };
 
-        let pty = tty::new(&pty_config, (cols as u16, rows as u16), 0)?;
+        let window_size = alacritty_terminal::event::WindowSize {
+            num_cols: cols as u16,
+            num_lines: rows as u16,
+            cell_width: 8,
+            cell_height: 16,
+        };
 
-        // Create terminal
+        let pty = tty::new(&pty_config, window_size, 0)?;
+
+        // Create terminal with TermSize
         let event_listener = TermEventListener::new();
-        let term = Term::new(
-            &alacritty_terminal::term::Config::default(),
-            &(cols as usize, rows as usize),
-            event_listener,
-        );
+        let term_size = TermSize::new(cols, rows);
+        let term = Term::new(TermConfig::default(), &term_size, event_listener);
 
         let term = Arc::new(Mutex::new(term));
 
-        // Create event loop notifier
-        let notifier = Notifier::new();
+        // Create VTE processor
+        let processor = Processor::new();
 
         Ok(Self {
             term,
             pty,
-            notifier,
+            processor,
         })
     }
 
@@ -65,14 +69,15 @@ impl Terminal {
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         debug!("Resizing terminal to {}x{}", cols, rows);
 
+        let term_size = TermSize::new(cols, rows);
         let mut term = self.term.lock();
-        term.resize((cols, rows));
+        term.resize(term_size);
 
         let window_size = alacritty_terminal::event::WindowSize {
             num_cols: cols as u16,
             num_lines: rows as u16,
-            cell_width: 8,  // Will be updated by renderer
-            cell_height: 16, // Will be updated by renderer
+            cell_width: 8,
+            cell_height: 16,
         };
 
         self.pty.on_resize(window_size);
@@ -98,7 +103,7 @@ impl Terminal {
                 Ok(n) => {
                     let mut term = self.term.lock();
                     for byte in &buf[..n] {
-                        term.advance(*byte);
+                        self.processor.advance(&mut *term, *byte);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -123,7 +128,7 @@ pub struct TermEventListener {
 }
 
 impl TermEventListener {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {}
     }
 }

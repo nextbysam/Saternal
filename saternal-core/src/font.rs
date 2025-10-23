@@ -72,8 +72,11 @@ impl FontManager {
     /// Get the cell dimensions (width, height) for this font
     pub fn cell_dimensions(&mut self) -> (usize, usize) {
         // Use 'M' as reference character for cell size
-        let (width, height, _) = self.get_glyph('M').unwrap_or(&(8, 16, vec![]));
-        (*width, *height)
+        if let Ok((width, height, _)) = self.get_glyph('M') {
+            (*width, *height)
+        } else {
+            (8, 16) // Fallback dimensions
+        }
     }
 
     /// Get font size
