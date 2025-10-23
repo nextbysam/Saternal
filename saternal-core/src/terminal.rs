@@ -2,18 +2,18 @@ use alacritty_terminal::{
     event::{EventListener, OnResize},
     grid::Dimensions,
     term::{test::TermSize, Config as TermConfig, Term},
-    tty,
+    tty::{self, EventedReadWrite},
     vte::ansi::Processor,
 };
 use anyhow::Result;
 use log::{debug, info};
 use parking_lot::Mutex;
-use std::{collections::HashMap, fs::File, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 /// Wrapper around Alacritty's terminal emulator
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventListener>>>,
-    pty: Box<dyn tty::EventedPty<Reader = File, Writer = File>>,
+    pty: tty::Pty,
     processor: Processor,
 }
 
@@ -51,7 +51,7 @@ impl Terminal {
 
         Ok(Self {
             term,
-            pty: Box::new(pty),
+            pty,
             processor,
         })
     }
@@ -62,9 +62,16 @@ impl Terminal {
     }
 
     /// Get the PTY for I/O operations
-    pub fn pty(&self) -> &dyn tty::EventedPty<Reader = File, Writer = File> {
-        self.pty.as_ref()
-    }
+    pub fn pty(&self) -> &tty::Pty {
+        &self.pty
+    } //what does PTY mean here, and what are expeting in return in this function?
+    //PTY means Pseudo Terminal, and we are expecting a reference to the PTY
+    //this is a reference to the PTY, so we can use it to read and write to the PTY
+    //the PTY is a trait that implements the EventedPty trait, which is a trait that
+    //implements the Reader and Writer traits
+    //the Reader trait is a trait that implements the read method
+    //the Writer trait is a trait that implements the write method
+    //the EventedPty trait is a trait that implements the on_resize method
 
     /// Resize the terminal
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {

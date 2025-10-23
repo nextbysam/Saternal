@@ -96,26 +96,39 @@
 - [x] **PLAN.md**: Detailed implementation plan
 - [x] **STATUS.md**: This status document
 
-## ⚠️ Known Issues
+## ✅ Recently Fixed (2025-10-23)
 
-### Compilation Errors
-The project has remaining compilation issues due to `alacritty_terminal` API compatibility:
+### Compilation Errors - ALL RESOLVED ✅
+All `alacritty_terminal` API compatibility issues have been fixed:
 
-1. **SizeInfo not found**: The `SizeInfo` type doesn't exist in alacritty_terminal 0.25
-   - Need to find correct way to initialize terminal dimensions
+1. **✅ SizeInfo replaced with TermSize**: Updated to use `term::test::TermSize` which implements `Dimensions` trait
+   - Changed from `SizeInfo::new()` to `TermSize::new(cols, rows)`
+   - Updated `Term::new()` and `term.resize()` calls
 
-2. **EventedPty associated types**: Missing Reader/Writer types specification
-   - Need to properly type the PTY trait object
+2. **✅ PTY type simplified**: Changed from trait object to concrete type
+   - Using `tty::Pty` directly instead of `Box<dyn EventedPty>`
+   - Added `EventedReadWrite` trait import for reader/writer methods
 
-3. **tty::Options missing fields**: Need to add `drain_on_exit` and `env` fields
+3. **✅ tty::Options fields added**: Added missing required fields
+   - Added `drain_on_exit: true`
+   - Added `env: HashMap::new()`
 
-4. **Type mismatches**: Various f32 multiplication and type compatibility issues
+4. **✅ Type mismatches fixed**:
+   - Fixed f32 multiplication by dereferencing ratio: `*ratio`
+   - Fixed processor.advance to accept `&[u8]` instead of individual bytes
+
+**Result**: `saternal-core` library now compiles successfully with only 2 minor warnings!
+
+## ⚠️ Remaining Issues
+
+### Main Binary Compilation
+The `saternal` binary (main application) has some remaining errors that need attention:
+- Missing imports in app.rs
+- Type mismatches in function signatures
+- Mutability issues in tab.rs
 
 ### What Needs to Be Done
-1. **Fix alacritty_terminal API usage**:
-   - Research correct initialization pattern for Term and PTY
-   - May need to update dependency version or adjust API calls
-   - Consider looking at Alacritty source code for examples
+1. **Fix main binary compilation errors** (next priority)
 
 2. **Complete renderer implementation**:
    - Implement actual glyph rendering in render pipeline
