@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cocoa::appkit::{NSScreen, NSWindow, NSWindowStyleMask};
+use cocoa::appkit::{NSEvent, NSScreen, NSWindow, NSWindowStyleMask};
 use cocoa::base::{id, nil, YES, NO};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 use core_graphics::display::CGDisplay;
@@ -23,11 +23,43 @@ impl DropdownWindow {
         }
     }
 
+    /// Get the screen containing the mouse cursor (active screen)
+    /// Falls back to main screen if mouse position cannot be determined
+    unsafe fn get_screen_with_mouse() -> id {
+        // Get current mouse location in screen coordinates
+        let mouse_location: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+        
+        // Get all available screens
+        let screens: id = msg_send![class!(NSScreen), screens];
+        let screen_count: usize = msg_send![screens, count];
+        
+        // Find which screen contains the mouse cursor
+        for i in 0..screen_count {
+            let screen: id = msg_send![screens, objectAtIndex: i];
+            let frame: NSRect = msg_send![screen, frame];
+            
+            // Check if mouse is within this screen's bounds
+            if mouse_location.x >= frame.origin.x
+                && mouse_location.x < frame.origin.x + frame.size.width
+                && mouse_location.y >= frame.origin.y
+                && mouse_location.y < frame.origin.y + frame.size.height
+            {
+                info!("Window will appear on screen {} (mouse at {:.0}, {:.0})", 
+                      i, mouse_location.x, mouse_location.y);
+                return screen;
+            }
+        }
+        
+        // Fallback to main screen if mouse not found on any screen
+        info!("Mouse not found on any screen, using main screen");
+        msg_send![class!(NSScreen), mainScreen]
+    }
+
     /// Configure a winit window to behave as a dropdown terminal
     /// ns_view is the winit NSView where wgpu will create the CAMetalLayer
     pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<()> {
-        // Get main screen dimensions
-        let screen: id = msg_send![class!(NSScreen), mainScreen];
+        // Get screen containing mouse cursor (active screen)
+        let screen = Self::get_screen_with_mouse();
         let screen_frame: NSRect = msg_send![screen, frame];
 
         // Calculate window dimensions
@@ -156,10 +188,13 @@ impl DropdownWindow {
     /// Toggle window visibility with animation
     pub unsafe fn toggle(&self, ns_window: id) -> Result<()> {
         let mut visible = self.visible.lock();
+        let was_visible = *visible;
         *visible = !*visible;
 
         if *visible {
-            self.show_animated(ns_window)?;
+            // Only reposition if window was hidden (transitioning hidden→visible)
+            // Don't reposition if toggling while already visible
+            self.show_animated(ns_window, !was_visible)?;
         } else {
             self.hide_animated(ns_window)?;
         }
@@ -168,8 +203,29 @@ impl DropdownWindow {
     }
 
     /// Show window with slide-down animation
-    unsafe fn show_animated(&self, ns_window: id) -> Result<()> {
-        info!("Showing dropdown window");
+    /// should_reposition: if true, move window to screen with mouse cursor
+    unsafe fn show_animated(&self, ns_window: id, should_reposition: bool) -> Result<()> {
+        info!("Showing dropdown window (reposition: {})", should_reposition);
+
+        // Only reposition if window was hidden (opening on active screen)
+        // Don't reposition if window is already visible (just a toggle)
+        if should_reposition {
+            let screen = Self::get_screen_with_mouse();
+            let screen_frame: NSRect = msg_send![screen, frame];
+            let current_frame: NSRect = msg_send![ns_window, frame];
+            
+            // Calculate new position (keep same height, but move to active screen)
+            let new_x = screen_frame.origin.x;
+            let new_y = screen_frame.origin.y + screen_frame.size.height - current_frame.size.height;
+            let new_width = screen_frame.size.width;
+            
+            let new_frame = NSRect::new(
+                NSPoint::new(new_x, new_y),
+                NSSize::new(new_width, current_frame.size.height),
+            );
+            
+            let () = msg_send![ns_window, setFrame:new_frame display:YES];
+        }
 
         // Make window visible
         let () = msg_send![ns_window, makeKeyAndOrderFront:nil];

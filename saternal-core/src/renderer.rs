@@ -391,6 +391,10 @@ impl<'a> Renderer<'a> {
         log::info!("Rendering terminal: {}x{} cells, cursor at ({}, {})",
                    cols, rows, cursor.column.0, cursor.line.0);
 
+        // Clamp scroll_offset to available scrollback history
+        let history_size = term.grid().history_size();
+        self.scroll_offset = self.scroll_offset.min(history_size);
+
         // Create buffer for the entire window/texture
         let width = self.config.width;
         let height = self.config.height;
