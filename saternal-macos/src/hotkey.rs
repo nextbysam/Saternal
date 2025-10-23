@@ -1,7 +1,7 @@
 use anyhow::Result;
 use global_hotkey::{
-    hotkey::{Code, HotKey, HotKeyState, Modifiers},
-    GlobalHotKeyEvent, GlobalHotKeyManager,
+    hotkey::{Code, HotKey, Modifiers},
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
 };
 use log::info;
 use parking_lot::Mutex;
@@ -49,7 +49,7 @@ impl HotkeyManager {
         while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
             if event.id == self.hotkey.id() {
                 // Only trigger on key DOWN events to avoid repeated triggers
-                if event.state == global_hotkey::hotkey::HotKeyState::Pressed {
+                if event.state == HotKeyState::Pressed {
                     let mut callback = self.callback.lock();
                     callback();
                 }

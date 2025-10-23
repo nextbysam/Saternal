@@ -23,11 +23,25 @@ impl Terminal {
         info!("Creating new terminal: {}x{}", cols, rows);
 
         // Create PTY with WindowSize
+        let mut env = HashMap::new();
+        // Set TERM environment variable for proper shell initialization
+        env.insert("TERM".to_string(), "xterm-256color".to_string());
+        // Inherit PATH and other important env vars
+        if let Ok(path) = std::env::var("PATH") {
+            env.insert("PATH".to_string(), path);
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            env.insert("HOME".to_string(), home);
+        }
+        if let Ok(user) = std::env::var("USER") {
+            env.insert("USER".to_string(), user);
+        }
+        
         let pty_config = tty::Options {
             shell: shell.map(|s| tty::Shell::new(s, vec![])),
-            working_directory: None,
+            working_directory: std::env::current_dir().ok(),
             drain_on_exit: true,
-            env: HashMap::new(),
+            env,
         };
 
         let window_size = alacritty_terminal::event::WindowSize {
@@ -105,16 +119,26 @@ impl Terminal {
         use std::io::Read;
 
         let mut buf = [0u8; 4096];
+        let mut total_bytes = 0;
         loop {
             match self.pty.reader().read(&mut buf) {
                 Ok(0) => break, // EOF
                 Ok(n) => {
+                    total_bytes += n;
+                    debug!("Read {} bytes from PTY: {:?}", n, String::from_utf8_lossy(&buf[..n]));
                     let mut term = self.term.lock();
                     self.processor.advance(&mut *term, &buf[..n]);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    debug!("PTY read error: {}", e);
+                    return Err(e.into());
+                }
             }
+        }
+        
+        if total_bytes > 0 {
+            info!("Processed {} bytes total from shell", total_bytes);
         }
 
         Ok(())

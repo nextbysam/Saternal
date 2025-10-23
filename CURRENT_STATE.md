@@ -32,21 +32,30 @@
 
 ## ⚠️ What's NOT Working Yet
 
-### Terminal Text Rendering
-- The window appears with a black background
-- **You cannot see any text** because the GPU text rendering pipeline isn't implemented
-- Keyboard input IS being sent to the shell, you just can't see it
-- Shell output IS being captured, you just can't see it
+### Terminal Text Rendering - DEBUGGING IN PROGRESS
 
-### Why There's No Text
-The renderer needs additional implementation:
-1. **Shaders**: WGSL shaders for rendering text quads
-2. **Texture atlas**: Store rasterized glyphs as GPU textures
-3. **Grid iteration**: Loop through terminal cells and render each character
-4. **Color handling**: Parse ANSI colors from cells
-5. **Vertex buffers**: Create quads for each glyph
+**Current Status (2025-10-23):**
+- ✅ Shell is working: PTY outputs 165 bytes (zsh prompt)
+- ✅ Terminal grid populated: 29 characters rendered ("sam@S..." visible in grid)
+- ✅ Pixels being written: RGBA values correctly written to buffer
+- ✅ Texture uploaded to GPU: 3024x982 texture with data
+- ❌ **NOTHING VISIBLE ON SCREEN**: Black window only
 
-See `RENDERING_TODO.md` for complete implementation plan.
+**Root Cause:**
+The texture→screen pipeline has an issue. Text rendering logic works (confirmed via logs), but the final display step fails. Investigating:
+1. Shader not sampling texture correctly
+2. Blend mode issue (alpha blending)
+3. Vertex buffer/quad not covering screen
+4. Surface configuration problem
+
+**Test Results:**
+- Filling entire texture with bright green (0, 255, 0, 255) → Still shows black
+- This confirms the issue is in the render pipeline, NOT text generation
+
+**Next Steps:**
+1. Debug shader to verify it's receiving/sampling texture
+2. Check if render pass is actually drawing the quad
+3. Verify blend state and color attachment settings
 
 ## 🎯 How to Test What Works
 

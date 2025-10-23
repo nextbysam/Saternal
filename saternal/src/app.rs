@@ -174,7 +174,11 @@ impl<'a> App<'a> {
                     // Process terminal output
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
-                            let _ = active_tab.process_output();
+                            if let Err(e) = active_tab.process_output() {
+                                log::error!("Error processing output: {}", e);
+                            }
+                        } else {
+                            log::warn!("No active tab found");
                         }
                     }
 

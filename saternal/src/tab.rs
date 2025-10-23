@@ -49,7 +49,10 @@ impl Tab {
     pub fn process_output(&mut self) -> Result<()> {
         // TODO: Process output from all panes, not just focused
         if let Some(pane) = self.pane_tree.focused_pane_mut() {
+            log::trace!("Tab {}: Processing pane output", self.id);
             pane.terminal.process_output()?;
+        } else {
+            log::warn!("Tab {}: No focused pane found", self.id);
         }
         Ok(())
     }

@@ -94,4 +94,14 @@ impl FontManager {
     pub fn clear_cache(&mut self) {
         self.glyph_cache.clear();
     }
+
+    /// Get reference to the underlying font
+    pub fn font(&self) -> &Font {
+        &self.font
+    }
+
+    /// Rasterize a glyph (returns metrics and grayscale bitmap)
+    pub fn rasterize(&self, ch: char) -> (fontdue::Metrics, Vec<u8>) {
+        self.font.rasterize(ch, self.font_size)
+    }
 }
