@@ -42,6 +42,12 @@ impl<'a> App<'a> {
         // Create event loop
         let event_loop = EventLoop::new()?;
 
+        // Set application icon (macOS) - must be after EventLoop creation
+        #[cfg(target_os = "macos")]
+        unsafe {
+            saternal_macos::set_app_icon();
+        }
+
         // Create window
         let window = WindowBuilder::new()
             .with_title("Saternal")

@@ -551,112 +551,6 @@ blink = true
 
 ---
 
-## Recommendations for Saternal
-
-### Immediate Priorities (Current Phase)
-
-#### 1. **Cursor Enhancements**
-- [x] Basic cursor rendering (DONE)
-- [x] Blink support (DONE)
-- [ ] Smooth cursor movement animations
-- [ ] Configurable cursor shapes (block/beam/underline)
-- [ ] Cursor color customization
-
-**Implementation:**
-```rust
-// saternal-core/src/renderer/cursor/config.rs
-pub enum CursorShape {
-    Block,
-    Beam,
-    Underline,
-}
-
-pub struct CursorConfig {
-    pub shape: CursorShape,
-    pub blink: bool,
-    pub blink_interval: Duration,
-    pub smooth_movement: bool,
-    pub animation_duration: Duration,
-}
-```
-
-#### 2. **Scroll Indicators**
-- [ ] Visual scrollbar
-- [ ] "Jump to bottom" button
-- [ ] Scroll position percentage
-
-**UI Mockup:**
-```
-┌──────────────────────────┐
-│                          │ ↑
-│  Terminal Content        │ █ 45%  ← Scroll indicator
-│  (scrolled up)           │ ║
-│                          │ ↓
-│ [⬇ Jump to Bottom]       │  ← Button when scrolled
-└──────────────────────────┘
-```
-
-#### 3. **Color Theming**
-- [ ] Define color palette structure
-- [ ] Implement theme loading
-- [ ] Provide 5-10 popular themes (Solarized, Dracula, Nord, etc.)
-- [ ] Hot reload on theme change
-
-#### 4. **Font Enhancements**
-- [x] Basic font rendering (DONE)
-- [x] Font size adjustment (DONE)
-- [ ] Font ligature support
-- [ ] Bold/italic font variants
-- [ ] Font fallback chain
-
-### Mid-Term Goals (Next Phase)
-
-#### 5. **Search Functionality**
-- [ ] Search in scrollback
-- [ ] Regex support
-- [ ] Highlight all matches
-- [ ] Keyboard shortcuts (⌘F)
-
-#### 6. **Selection & Copy/Paste**
-- [ ] Mouse selection
-- [ ] Keyboard selection
-- [ ] Smart selection (URLs, paths)
-- [ ] Copy to clipboard
-- [ ] Paste from clipboard
-
-#### 7. **Tab Management**
-- [ ] Multiple tabs
-- [ ] Tab bar UI
-- [ ] Tab switching (⌘1-9, ⌘⇧[/])
-- [ ] Tab titles
-
-#### 8. **Split Panes** (Inspired by Zellij)
-- [ ] Horizontal/vertical splits
-- [ ] Focus management
-- [ ] Pane borders
-- [ ] Resize panes
-
-### Long-Term Vision
-
-#### 9. **Advanced Features**
-- [ ] Images in terminal (Sixel/iTerm2 protocol)
-- [ ] Hyperlink support
-- [ ] Ligature support
-- [ ] Custom shaders (Rio-inspired)
-
-#### 10. **Configuration System**
-- [ ] TOML config file
-- [ ] Hot reload
-- [ ] Sensible defaults
-- [ ] CLI flag overrides
-
-#### 11. **Platform-Specific Polish**
-- [ ] macOS: Native window decorations
-- [ ] macOS: Touch Bar support
-- [ ] macOS: Trackpad gestures
-- [ ] Multi-platform: Consistent experience
-
----
 
 ## Design Principles for Saternal
 
@@ -761,37 +655,390 @@ pub struct UIColors {
 
 ---
 
-## Implementation Roadmap
+## Implementation Roadmap & Task Tracking
 
-### Phase 1: Core UX Polish (Current)
-- ✅ Cursor rendering
-- ✅ Basic scrolling
-- 🔄 Scroll indicators
-- 🔄 Theme system foundation
+**Progress Overview:**
+```
+Phase 1: Core UX Polish        [████░░░░░░] 40% (4/10 tasks)
+Phase 2: User Interaction      [░░░░░░░░░░]  0% (0/15 tasks)
+Phase 3: Window Management     [░░░░░░░░░░]  0% (0/12 tasks)
+Phase 4: Advanced Features     [░░░░░░░░░░]  0% (0/8 tasks)
+Phase 5: Configuration         [░░░░░░░░░░]  0% (0/10 tasks)
 
-### Phase 2: User Interaction
-- Selection & clipboard
-- Search functionality
-- Keyboard shortcuts
-- Mouse interactions
+Overall Progress: [██░░░░░░░░] 7% (4/55 tasks)
+```
 
-### Phase 3: Window Management
-- Tabs
-- Splits
-- Focus management
-- Layout persistence
+### Phase 1: Core UX Polish (Current) - 2-3 weeks
 
-### Phase 4: Advanced Features
-- Images
-- Hyperlinks
-- Ligatures
-- Custom shaders
+**Goal:** Polish the core rendering experience with smooth interactions and visual feedback.
 
-### Phase 5: Configuration & Polish
-- Config system
-- GUI preferences
-- Performance profiling
-- Cross-platform testing
+#### 1.1 Cursor System Enhancements
+
+- [x] **Task 1.1.1:** Basic cursor rendering (COMPLETED)
+  - File: `saternal-core/src/renderer/cursor/state.rs`
+
+- [x] **Task 1.1.2:** Cursor blink support (COMPLETED)
+  - File: `saternal-core/src/renderer/cursor/state.rs`
+
+- [ ] **Task 1.1.3:** Hide cursor when scrolled in history
+  - File: `saternal-core/src/renderer/mod.rs:161`
+  - Time: 30 minutes
+  - Code:
+    ```rust
+    let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR)
+                      || self.scroll_offset > 0;
+    ```
+
+- [ ] **Task 1.1.4:** Configurable cursor shapes (Block/Beam/Underline)
+  - Files: `cursor/config.rs`, `cursor/state.rs`, `cursor/pipeline.rs`
+  - Time: 3-4 hours
+  - Steps:
+    1. Create CursorShape enum
+    2. Update CursorConfig struct
+    3. Modify shader for different shapes
+    4. Update uniform buffer
+
+- [ ] **Task 1.1.5:** Smooth cursor movement animations
+  - File: `saternal-core/src/renderer/cursor/state.rs`
+  - Time: 2-3 hours
+  - Implementation: Interpolate between positions with easing
+
+- [ ] **Task 1.1.6:** Cursor color customization
+  - Files: `cursor/config.rs`, `config.rs`
+  - Time: 1 hour
+
+#### 1.2 Scrollback Indicators
+
+- [ ] **Task 1.2.1:** Visual scrollbar overlay
+  - Files: `renderer/scrollbar/mod.rs` (new), `renderer/mod.rs`
+  - Time: 4-5 hours
+  - Design: 8px width, semi-transparent, right edge, auto-hide
+
+- [ ] **Task 1.2.2:** Scroll position percentage indicator
+  - File: `renderer/scrollbar/mod.rs`
+  - Time: 2 hours
+  - Shows "X%" or "Line Y of Z", fades after 2s
+
+- [ ] **Task 1.2.3:** "Jump to Bottom" button
+  - Files: `renderer/ui/mod.rs` (new), `input.rs`
+  - Time: 3-4 hours
+  - Appears when `scroll_offset > 100`, click or Shift+G/End
+
+- [ ] **Task 1.2.4:** Smooth scrolling animation
+  - File: `renderer/mod.rs`
+  - Time: 3 hours
+  - Spring-based interpolation, 60fps
+
+#### 1.3 Color & Theme System
+
+- [ ] **Task 1.3.1:** Define ColorPalette structure
+  - Files: `theme/mod.rs` (new), `theme/palette.rs` (new)
+  - Time: 2 hours
+  - Structure: primary, cursor, selection, ANSI colors, UI colors
+
+- [ ] **Task 1.3.2:** Create default theme
+  - File: `theme/defaults.rs` (new)
+  - Time: 1-2 hours
+  - Beautiful dark theme, WCAG AA compliant
+
+- [ ] **Task 1.3.3:** Implement theme loading from TOML
+  - Files: `theme/loader.rs` (new), `config.rs`
+  - Time: 3 hours
+  - Parse TOML, validate colors, fallback on error
+
+- [ ] **Task 1.3.4:** Popular theme presets (5 themes)
+  - Files: `themes/solarized-dark.toml`, `dracula.toml`, `nord.toml`, `gruvbox.toml`, `catppuccin.toml`
+  - Time: 2-3 hours
+
+- [ ] **Task 1.3.5:** Hot reload theme on config change
+  - Files: `theme/loader.rs`, `app.rs`
+  - Time: 2 hours
+  - Use notify crate to watch file
+
+#### 1.4 Font System Improvements
+
+- [x] **Task 1.4.1:** Basic font rendering (COMPLETED)
+
+- [x] **Task 1.4.2:** Font size adjustment (COMPLETED)
+
+- [ ] **Task 1.4.3:** Font ligature support
+  - Files: Update Cargo.toml, `font.rs`, `text_rasterizer.rs`
+  - Time: 6-8 hours (complex)
+  - Switch from fontdue to swash, enable OpenType features
+
+- [ ] **Task 1.4.4:** Bold/italic font variants
+  - File: `font.rs`
+  - Time: 4-5 hours
+  - Load variants or synthetic bold fallback
+
+- [ ] **Task 1.4.5:** Font fallback chain
+  - Files: `font.rs`, `config.rs`
+  - Time: 5-6 hours
+  - Try multiple fonts for missing glyphs, emoji support
+
+---
+
+### Phase 2: User Interaction - 3-4 weeks
+
+**Goal:** Implement essential user interactions for productivity.
+
+#### 2.1 Text Selection
+
+- [ ] **Task 2.1.1:** Mouse selection (drag to select)
+  - Files: `selection/mod.rs` (new), `input.rs`
+  - Time: 6-8 hours
+
+- [ ] **Task 2.1.2:** Keyboard selection (Shift+arrows)
+  - Files: `selection/mod.rs`, `input.rs`
+  - Time: 4-5 hours
+
+- [ ] **Task 2.1.3:** Smart selection (double-click word, URLs, paths)
+  - File: `selection/smart.rs` (new)
+  - Time: 5-6 hours
+  - Patterns: URLs, file paths, IPs
+
+- [ ] **Task 2.1.4:** Render selection highlighting
+  - Files: `renderer/selection/mod.rs` (new), `renderer/mod.rs`
+  - Time: 4-5 hours
+
+#### 2.2 Clipboard Integration
+
+- [ ] **Task 2.2.1:** Copy to clipboard (Cmd+C)
+  - Files: `clipboard.rs` (new), `input.rs`
+  - Time: 3-4 hours
+  - Dependency: arboard crate
+
+- [ ] **Task 2.2.2:** Paste from clipboard (Cmd+V)
+  - Files: `clipboard.rs`, `input.rs`
+  - Time: 3-4 hours
+  - Multiline paste confirmation, bracket paste mode
+
+- [ ] **Task 2.2.3:** Primary selection (Linux middle-click)
+  - File: `clipboard.rs`
+  - Time: 2 hours (Linux only)
+
+#### 2.3 Search Functionality
+
+- [ ] **Task 2.3.1:** Basic search UI (Cmd+F)
+  - Files: `search/mod.rs` (new), `search/ui.rs` (new)
+  - Time: 5-6 hours
+
+- [ ] **Task 2.3.2:** Search in scrollback buffer
+  - File: `search/engine.rs` (new)
+  - Time: 4-5 hours
+
+- [ ] **Task 2.3.3:** Regex search support
+  - File: `search/engine.rs`
+  - Time: 3 hours
+  - Dependency: regex crate
+
+- [ ] **Task 2.3.4:** Incremental search
+  - File: `search/mod.rs`
+  - Time: 2-3 hours
+
+- [ ] **Task 2.3.5:** Search match highlighting
+  - File: `renderer/search/mod.rs` (new)
+  - Time: 3-4 hours
+
+#### 2.4 Keyboard Shortcuts
+
+- [ ] **Task 2.4.1:** Define keyboard shortcut system
+  - Files: `keybindings/mod.rs` (new), `keybindings/parser.rs` (new)
+  - Time: 4-5 hours
+
+- [ ] **Task 2.4.2:** Implement standard shortcuts
+  - File: `keybindings/defaults.rs` (new)
+  - Time: 3-4 hours
+  - Shortcuts: Cmd+C/V/F/K/T/W, Cmd+Plus/Minus/0
+
+- [ ] **Task 2.4.3:** Configurable key bindings
+  - File: `config.rs`
+  - Time: 2-3 hours
+
+#### 2.5 Mouse Interactions
+
+- [ ] **Task 2.5.1:** Mouse event handling
+  - File: `input.rs`
+  - Time: 3-4 hours
+
+- [ ] **Task 2.5.2:** Hover states for UI elements
+  - File: `renderer/ui/mod.rs`
+  - Time: 2-3 hours
+
+---
+
+### Phase 3: Window Management - 4-5 weeks
+
+**Goal:** Implement tabs and splits for power users.
+
+#### 3.1 Tab System
+
+- [ ] **Task 3.1.1:** Tab data structure
+  - File: `tab.rs` (enhance)
+  - Time: 2-3 hours
+
+- [ ] **Task 3.1.2:** Tab bar UI
+  - File: `renderer/tabbar/mod.rs` (new)
+  - Time: 6-8 hours
+
+- [ ] **Task 3.1.3:** Tab switching (Cmd+1-9, Cmd+Tab)
+  - File: `app.rs`
+  - Time: 2-3 hours
+
+- [ ] **Task 3.1.4:** New tab (Cmd+T)
+  - File: `app.rs`
+  - Time: 3-4 hours
+
+- [ ] **Task 3.1.5:** Close tab (Cmd+W)
+  - File: `app.rs`
+  - Time: 2-3 hours
+
+- [ ] **Task 3.1.6:** Tab titles and customization
+  - File: `tab.rs`
+  - Time: 4-5 hours
+
+#### 3.2 Split Panes
+
+- [ ] **Task 3.2.1:** Pane layout system (tree structure)
+  - Files: `pane.rs` (enhance), `layout/mod.rs` (new)
+  - Time: 8-10 hours
+
+- [ ] **Task 3.2.2:** Split pane horizontally (Cmd+D)
+  - File: `app.rs`
+  - Time: 5-6 hours
+
+- [ ] **Task 3.2.3:** Split pane vertically (Cmd+Shift+D)
+  - File: `app.rs`
+  - Time: 2-3 hours
+
+- [ ] **Task 3.2.4:** Pane focus navigation
+  - File: `app.rs`
+  - Time: 4-5 hours
+
+- [ ] **Task 3.2.5:** Pane borders and visual focus
+  - File: `renderer/pane/mod.rs` (new)
+  - Time: 5-6 hours
+
+- [ ] **Task 3.2.6:** Resize panes with mouse/keyboard
+  - Files: `app.rs`, `input.rs`
+  - Time: 6-8 hours
+
+---
+
+### Phase 4: Advanced Features - 4-6 weeks
+
+**Goal:** Differentiate Saternal with modern features.
+
+#### 4.1 Hyperlink Support
+
+- [ ] **Task 4.1.1:** OSC 8 hyperlink parsing
+  - File: `terminal.rs`
+  - Time: 4-5 hours
+
+- [ ] **Task 4.1.2:** Hyperlink rendering
+  - File: `renderer/text_rasterizer.rs`
+  - Time: 3-4 hours
+
+- [ ] **Task 4.1.3:** Click to open links
+  - File: `input.rs`
+  - Time: 3-4 hours
+
+#### 4.2 Image Support
+
+- [ ] **Task 4.2.1:** Sixel image protocol
+  - File: `image/sixel.rs` (new)
+  - Time: 12-15 hours
+
+- [ ] **Task 4.2.2:** iTerm2 inline images
+  - File: `image/iterm2.rs` (new)
+  - Time: 8-10 hours
+
+- [ ] **Task 4.2.3:** Image rendering in terminal
+  - File: `renderer/image/mod.rs` (new)
+  - Time: 10-12 hours
+
+#### 4.3 Advanced Rendering
+
+- [ ] **Task 4.3.1:** Custom shader support
+  - File: `renderer/shaders/custom.rs` (new)
+  - Time: 8-10 hours
+
+- [ ] **Task 4.3.2:** Background blur/transparency
+  - File: `renderer/mod.rs`
+  - Time: 6-8 hours
+  - Platform: macOS initially
+
+---
+
+### Phase 5: Configuration & Polish - 3-4 weeks
+
+**Goal:** Make Saternal production-ready.
+
+#### 5.1 Configuration System
+
+- [ ] **Task 5.1.1:** TOML config file structure
+  - File: `config.rs`
+  - Time: 4-5 hours
+  - Location: `~/.config/saternal/config.toml`
+
+- [ ] **Task 5.1.2:** Config validation and error handling
+  - File: `config/validation.rs` (new)
+  - Time: 3-4 hours
+
+- [ ] **Task 5.1.3:** Hot reload config
+  - File: `app.rs`
+  - Time: 4-5 hours
+
+- [ ] **Task 5.1.4:** CLI flag overrides
+  - File: `main.rs`
+  - Time: 3-4 hours
+  - Dependency: clap crate
+
+#### 5.2 Performance Optimization
+
+- [ ] **Task 5.2.1:** Glyph cache optimization
+  - Files: `font.rs`, `renderer/text_rasterizer.rs`
+  - Time: 5-6 hours
+
+- [ ] **Task 5.2.2:** Dirty region tracking
+  - File: `renderer/mod.rs`
+  - Time: 6-8 hours
+
+- [ ] **Task 5.2.3:** Frame rate profiling
+  - File: `profiling.rs` (new)
+  - Time: 3-4 hours
+
+#### 5.3 Platform-Specific Polish
+
+- [ ] **Task 5.3.1:** macOS native window decorations
+  - File: `saternal-macos/src/window.rs`
+  - Time: 5-6 hours
+
+- [ ] **Task 5.3.2:** macOS trackpad gestures
+  - File: `saternal-macos/src/window.rs`
+  - Time: 6-8 hours
+
+- [ ] **Task 5.3.3:** Linux window manager integration
+  - Time: 8-10 hours
+
+#### 5.4 Documentation & Testing
+
+- [ ] **Task 5.4.1:** User documentation
+  - Files: `README.md`, `docs/USER_GUIDE.md`, `docs/CONFIGURATION.md`
+  - Time: 6-8 hours
+
+- [ ] **Task 5.4.2:** Developer documentation
+  - Files: `docs/ARCHITECTURE.md`, `docs/CONTRIBUTING.md`
+  - Time: 4-5 hours
+
+- [ ] **Task 5.4.3:** Integration tests
+  - Dir: `saternal/tests/` (new)
+  - Time: 10-12 hours
+
+- [ ] **Task 5.4.4:** Performance benchmarks
+  - Dir: `saternal/benches/` (new)
+  - Time: 6-8 hours
+  - Dependency: criterion crate
 
 ---
 
