@@ -579,13 +579,23 @@ impl<'a> Renderer<'a> {
     
     /// Recreate vertex buffer with current cell dimensions
     fn recreate_vertex_buffer(&mut self) -> Result<()> {
-        // Define vertices for a single cell quad
+        // Use the same vertex structure as the original
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct Vertex {
+            position: [f32; 2],
+            tex_coords: [f32; 2],
+        }
+
         let vertices = [
-            // Position (x, y, z), UV (u, v)
-            0.0, 0.0, 0.0, 0.0, 0.0,  // Top-left
-            self.cell_width, 0.0, 0.0, 1.0, 0.0,  // Top-right
-            0.0, self.cell_height, 0.0, 0.0, 1.0,  // Bottom-left
-            self.cell_width, self.cell_height, 0.0, 1.0, 1.0,  // Bottom-right
+            // Top-left triangle
+            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex { position: [-1.0, -1.0], tex_coords: [0.0, 1.0] },
+            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
+            // Bottom-right triangle
+            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
+            Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] },
         ];
 
         self.vertex_buffer = self.device.create_buffer_init(
@@ -600,6 +610,9 @@ impl<'a> Renderer<'a> {
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             },
         );
+        
+        info!("Recreated vertex buffer with 6 vertices for new cell size: {}x{}", 
+              self.cell_width, self.cell_height);
         
         Ok(())
     }

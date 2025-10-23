@@ -273,10 +273,38 @@ Press **Cmd+`** to toggle. You will see:
 
 **EVERYTHING WORKS! PRODUCTION-QUALITY TERMINAL RENDERING!**
 
+## 🎯 NEW FEATURE: Dynamic Font Size Control (Added 2025-10-23)
+
+### ✅ Real-Time Font Resizing Without Restart
+
+**Implemented**: Full font zoom functionality matching industry-standard terminal emulators (iTerm2, WezTerm, Alacritty).
+
+**Keyboard Shortcuts**:
+- `Cmd+=` or `Cmd++` - Increase font size by 2pt (capped at 48pt)
+- `Cmd+-` - Decrease font size by 2pt (minimum 8pt)  
+- `Cmd+0` - Reset to default size (14pt)
+
+**Technical Implementation**:
+1. **Real-Time Renderer Updates**: Added `Renderer::set_font_size()` method that:
+   - Updates the FontManager with new size
+   - Recalculates cell dimensions dynamically
+   - Recreates vertex buffer with new dimensions
+   - Maintains GPU rendering pipeline without restart
+
+2. **Configuration Persistence**: Font size changes are saved immediately to `~/.config/saternal/config.toml` and persist across restarts
+
+3. **Smart Key Handling**: Fixed keyboard input to prevent non-printable characters from being sent to shell when shortcuts are used
+
+**Files Modified**:
+- `saternal/saternal-core/src/renderer.rs` - Added font size update methods, fixed vertex buffer recreation
+- `saternal/saternal/src/app.rs` - Connected shortcuts to renderer, fixed event flow
+
+**Verification**: Font size changes instantly without restart, maintaining crisp rendering and proper baseline alignment.
+
 ---
 
-**Last Updated**: 2025-10-23 Late Evening (Grid Access + Baseline Positioning Fixed!)
-**Status**: 🎉 **COMPLETE! Production-quality terminal with proper text baseline alignment!**
+**Last Updated**: 2025-10-23 (Dynamic Font Resizing Added!)
+**Status**: 🎉 **COMPLETE! Production-quality terminal with real-time font control!**
 **Next Goal**: Add cursor rendering and polish UI
 
 ---
