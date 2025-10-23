@@ -1030,7 +1030,104 @@ let line = Line(row_idx as i32 - scroll_offset as i32);
 
 ---
 
-**Document Status:** Implementation Complete (visibility + positioning fixes)
+## Issue #5: Cursor Rendering Above Correct Position (FIXED - 2025-10-23)
+
+### Problem Description
+
+The cursor was rendering one line above its correct position. In the terminal, when typing at the prompt on line 4, the cursor would appear between line 3 and line 4 instead of on line 4 where the text is.
+
+### Root Cause
+
+**Location:** `saternal-core/src/renderer/cursor/state.rs:151`
+
+The NDC height was positive, causing the cursor quad to extend **upward** instead of **downward** in normalized device coordinates.
+
+```rust
+let ndc_height = (height / window_height as f32) * 2.0;  // ❌ WRONG - extends upward!
+```
+
+**Why this caused the issue:**
+
+In NDC (Normalized Device Coordinates):
+- Y = +1.0 is the **top** of the screen
+- Y = -1.0 is the **bottom** of the screen
+- Positive Y values go UP, negative values go DOWN
+
+The shader generates a quad from the cursor position:
+```wgsl
+let final_pos = pos + local * size;
+```
+
+Where `local` goes from (0,0) to (1,1), so:
+- Top-left: `pos + (0, 0) * size = pos`
+- Bottom-right: `pos + (1, 1) * size = pos + size`
+
+With a **positive** size.y:
+- Top of cursor: `pos.y` (e.g., 0.5)
+- Bottom of cursor: `pos.y + size.y` (e.g., 0.5 + 0.2 = 0.7)
+- **Result:** Cursor extends UPWARD (toward top of screen) ❌
+
+With a **negative** size.y:
+- Top of cursor: `pos.y` (e.g., 0.5)
+- Bottom of cursor: `pos.y - size.y` (e.g., 0.5 - 0.2 = 0.3)
+- **Result:** Cursor extends DOWNWARD (toward bottom of screen) ✅
+
+### The Fix
+
+**Before:**
+```rust
+let ndc_width = (width / window_width as f32) * 2.0;
+let ndc_height = (height / window_height as f32) * 2.0;
+```
+
+**After:**
+```rust
+let ndc_width = (width / window_width as f32) * 2.0;
+let ndc_height = -((height / window_height as f32) * 2.0); // Negative to extend downward in NDC
+```
+
+### Coordinate System Reference
+
+**Pixel Space** (used for text rendering):
+- Origin: Top-left (0, 0)
+- X increases: Left → Right
+- Y increases: Top → Bottom
+- Y-axis: Down is positive
+
+**NDC Space** (used by GPU):
+- Origin: Center (0, 0)
+- X increases: Left (-1) → Right (+1)
+- Y increases: Bottom (-1) → Top (+1)  
+- Y-axis: Up is positive, **inverted from pixel space**
+
+**Conversion from Pixel to NDC:**
+```rust
+// X conversion (same direction, just scaled and shifted)
+let ndc_x = (pixel_x / window_width) * 2.0 - 1.0;
+
+// Y conversion (inverted direction, scaled and shifted)
+let ndc_y = -((pixel_y / window_height) * 2.0 - 1.0);
+
+// Size conversion
+let ndc_width = (pixel_width / window_width) * 2.0;     // Positive (rightward)
+let ndc_height = -((pixel_height / window_height) * 2.0); // Negative (downward)
+```
+
+### Why Width is Positive but Height is Negative
+
+- **Width:** In both pixel and NDC space, rightward is positive → size is positive
+- **Height:** In pixel space, downward is positive, but in NDC space, downward is negative → size must be negative
+
+### Verification
+
+After the fix, cursor positioning should be correct:
+- [x] Cursor aligns with the text baseline on the same line
+- [x] Cursor doesn't appear one line above the prompt
+- [x] Cursor extends from top of cell to bottom of cell
+
+---
+
+**Document Status:** Implementation Complete (visibility + positioning + NDC direction fixes)
 **Last Updated:** 2025-10-23
 **Author:** Claude (AI Assistant)
 **For:** Saternal Terminal Emulator Project

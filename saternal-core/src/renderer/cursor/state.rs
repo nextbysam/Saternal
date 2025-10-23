@@ -148,7 +148,7 @@ impl CursorState {
         };
 
         let ndc_width = (width / window_width as f32) * 2.0;
-        let ndc_height = (height / window_height as f32) * 2.0;
+        let ndc_height = -((height / window_height as f32) * 2.0); // Negative to extend downward in NDC
 
         // Determine visibility
         let visible = if should_hide {
@@ -158,6 +158,9 @@ impl CursorState {
         } else {
             1
         };
+        
+        log::debug!("Cursor state: pixel=({:.1}, {:.1}), ndc=({:.3}, {:.3}), size=({:.3}, {:.3}), visible={}, scroll={}, hide={}",
+                   pixel_x, pixel_y, ndc_x, ndc_y, ndc_width, ndc_height, visible, scroll_offset, hide_cursor);
 
         self.current_uniforms = CursorUniforms {
             position: [ndc_x, ndc_y],

@@ -165,6 +165,10 @@ impl<'a> Renderer<'a> {
         // SHOW_CURSOR flag present = visible, absent = hidden
         let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR);
         
+        log::debug!("Cursor: pos=({}, {}), SHOW_CURSOR={}, hide={}", 
+                   cursor_pos.column.0, cursor_pos.line.0, 
+                   term.mode().contains(TermMode::SHOW_CURSOR), hide_cursor);
+        
         let line_metrics = self.font_manager.font()
             .horizontal_line_metrics(self.font_manager.font_size())
             .unwrap();
