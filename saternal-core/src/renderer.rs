@@ -26,6 +26,7 @@ pub struct Renderer<'a> {
     cell_width: f32,
     cell_height: f32,
     baseline_offset: f32,
+    scroll_offset: usize,
 }
 
 impl<'a> Renderer<'a> {
@@ -291,7 +292,28 @@ impl<'a> Renderer<'a> {
             cell_width,
             cell_height,
             baseline_offset,
+            scroll_offset: 0,
         })
+    }
+
+    /// Scroll viewport by delta lines
+    /// Positive delta = scroll up (into history), Negative delta = scroll down (toward present)
+    pub fn scroll(&mut self, delta: i32) {
+        if delta > 0 {
+            // Scroll up - increase offset
+            self.scroll_offset = self.scroll_offset.saturating_add(delta as usize);
+            log::debug!("Scrolled up, offset now: {}", self.scroll_offset);
+        } else {
+            // Scroll down - decrease offset
+            self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as usize);
+            log::debug!("Scrolled down, offset now: {}", self.scroll_offset);
+        }
+    }
+
+    /// Reset scroll to bottom (live view)
+    pub fn reset_scroll(&mut self) {
+        self.scroll_offset = 0;
+        log::debug!("Reset scroll to bottom");
     }
 
     /// Render a frame with terminal content
@@ -385,7 +407,8 @@ impl<'a> Renderer<'a> {
         // Render each cell from the terminal grid
         let mut char_count = 0;
         for row_idx in 0..rows {
-            let line = Line(row_idx as i32);
+            // Apply scroll offset: negative Line indices access scrollback
+            let line = Line(row_idx as i32 - self.scroll_offset as i32);
             for col_idx in 0..cols {
                 let column = Column(col_idx);
                 let cell = &term.grid()[line][column];

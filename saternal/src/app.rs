@@ -8,7 +8,7 @@ use saternal_core::{Config, Renderer};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
-    event::{Event, WindowEvent, ElementState, Modifiers},
+    event::{Event, WindowEvent, ElementState, Modifiers, MouseScrollDelta},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{PhysicalKey, KeyCode, Key},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -296,7 +296,28 @@ impl<'a> App<'a> {
                     }
                 }
 
+                Event::WindowEvent {
+                    event: WindowEvent::MouseWheel { delta, .. },
+                    ..
+                } => {
+                    // Convert scroll delta to lines
+                    let scroll_lines = match delta {
+                        MouseScrollDelta::LineDelta(_x, y) => {
+                            // Mouse wheel: y > 0 = scroll up, y < 0 = scroll down
+                            // Multiply by 3 for comfortable scrolling speed (3 lines per notch)
+                            (y * 3.0) as i32
+                        }
+                        MouseScrollDelta::PixelDelta(pos) => {
+                            // Trackpad: convert pixels to lines
+                            // Divide by approximate cell height (20px)
+                            (pos.y / 20.0) as i32
+                        }
+                    };
 
+                    if scroll_lines != 0 {
+                        renderer.lock().scroll(scroll_lines);
+                    }
+                }
 
                 Event::AboutToWait => {
                     // Process terminal output
