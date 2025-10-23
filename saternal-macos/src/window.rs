@@ -90,8 +90,8 @@ impl DropdownWindow {
         // Set autoresizing mask
         let () = msg_send![visual_effect_view, setAutoresizingMask:0x12]; // Width + Height sizable
 
-        // Add as subview
-        let () = msg_send![content_view, addSubview:visual_effect_view positioned:0 relativeTo:nil];
+        // Add as subview (NSWindowBelow = -1 to place it behind other views)
+        let () = msg_send![content_view, addSubview:visual_effect_view positioned:(-1i64) relativeTo:nil];
 
         Ok(())
     }
