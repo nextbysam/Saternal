@@ -19,7 +19,7 @@ alacritty_terminal = "0.25"
 vte = "0.15"
 
 # GPU rendering
-wgpu = "0.18"
+wgpu = "0.19"
 winit = "0.29"
 
 # Font handling
