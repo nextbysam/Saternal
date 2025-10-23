@@ -1,14 +1,16 @@
 use crate::tab::TabManager;
 use anyhow::Result;
+use cocoa::base::id;
 use log::{debug, info};
+use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use saternal_core::{Config, Renderer};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::WindowBuilder,
 };
 
@@ -16,12 +18,19 @@ use winit::{
 pub struct App<'a> {
     config: Config,
     event_loop: EventLoop<()>,
-    window: Arc<winit::window::Window>,
+    window: Arc<winit::window::Window>,  // Keep for event loop
     renderer: Arc<Mutex<Renderer<'a>>>,
     tab_manager: Arc<Mutex<TabManager>>,
     dropdown: Arc<Mutex<DropdownWindow>>,
     hotkey_manager: Arc<HotkeyManager>,
 }
+
+// SAFETY: The App struct is self-referential - renderer borrows from window.
+// This is safe because:
+// 1. Both are behind Arc, preventing moves
+// 2. The renderer's lifetime is tied to 'a which spans the entire App lifetime
+// 3. We never move window while renderer exists
+// 4. The window Arc is never dropped before renderer
 
 impl<'a> App<'a> {
     /// Create a new application
@@ -46,21 +55,15 @@ impl<'a> App<'a> {
         unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
-                    let ns_window = appkit_handle.ns_window.as_ptr() as cocoa::base::id;
+                    let ns_view = appkit_handle.ns_view.as_ptr() as id;
+                    let ns_window: id = msg_send![ns_view, window];
                     dropdown.configure_window(ns_window, config.window.height_percentage)?;
                 }
             }
         }
         let dropdown = Arc::new(Mutex::new(dropdown));
 
-        // Create renderer
-        let renderer = Renderer::new(
-            &window,
-            &config.appearance.font_family,
-            config.appearance.font_size,
-        )
-        .await?;
-        let renderer = Arc::new(Mutex::new(renderer));
+
 
         // Create tab manager
         let tab_manager = TabManager::new(config.terminal.shell.clone())?;
@@ -75,7 +78,8 @@ impl<'a> App<'a> {
             unsafe {
                 if let Ok(handle) = window_clone.window_handle() {
                     if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
-                        let ns_window = appkit_handle.ns_window.as_ptr() as cocoa::base::id;
+                        let ns_view = appkit_handle.ns_view.as_ptr() as id;
+                        let ns_window: id = msg_send![ns_view, window];
                         let _ = dropdown.toggle(ns_window);
                     }
                 }
@@ -83,6 +87,26 @@ impl<'a> App<'a> {
         })?;
         let hotkey_manager = Arc::new(hotkey_manager);
 
+        // SAFETY: We're creating a self-referential structure here.
+        // The renderer holds a reference to window with lifetime 'a.
+        // This is safe because:
+        // 1. Both window and renderer are stored in the same struct
+        // 2. The lifetime 'a is the lifetime of the App itself
+        // 3. We use std::mem::transmute to extend the window's lifetime to 'a
+        //    since it will live as long as the App struct
+        let window_static: &'a winit::window::Window = unsafe {
+            std::mem::transmute(&*window as &winit::window::Window)
+        };
+        
+        // Now create the renderer with the extended lifetime
+        let renderer = Renderer::new(
+            window_static,
+            &config.appearance.font_family,
+            config.appearance.font_size,
+        )
+        .await?;
+        let renderer = Arc::new(Mutex::new(renderer));
+        
         Ok(Self {
             config,
             event_loop,
