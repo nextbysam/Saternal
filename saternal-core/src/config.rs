@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::renderer::cursor::CursorConfig;
+
 /// Configuration for Saternal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -38,6 +40,9 @@ pub struct AppearanceConfig {
     pub opacity: f32,
     /// Enable background blur
     pub blur: bool,
+    /// Cursor configuration
+    #[serde(default)]
+    pub cursor: CursorConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +72,7 @@ impl Default for Config {
                 font_size: 14.0,
                 opacity: 0.95,
                 blur: true,
+                cursor: CursorConfig::default(),
             },
             terminal: TerminalConfig {
                 shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),

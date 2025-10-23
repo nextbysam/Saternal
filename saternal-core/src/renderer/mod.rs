@@ -1,4 +1,5 @@
 mod color;
+pub mod cursor;
 mod gpu;
 mod pipeline;
 mod text_rasterizer;
@@ -12,6 +13,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use wgpu;
 
+use cursor::{create_cursor_pipeline, CursorConfig, CursorState};
 use gpu::GpuContext;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
@@ -29,6 +31,8 @@ pub struct Renderer<'a> {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     scroll_offset: usize,
+    cursor_state: CursorState,
+    cursor_pipeline: wgpu::RenderPipeline,
 }
 
 impl<'a> Renderer<'a> {
@@ -37,6 +41,7 @@ impl<'a> Renderer<'a> {
         window: &'a winit::window::Window,
         font_family: &str,
         font_size: f32,
+        cursor_config: CursorConfig,
     ) -> Result<Self> {
         // Initialize GPU context
         let gpu = GpuContext::new(window).await?;
@@ -73,6 +78,14 @@ impl<'a> Renderer<'a> {
         // Create vertex buffer
         let vertex_buffer = create_vertex_buffer(&gpu.device);
 
+        // Create cursor state and pipeline
+        let cursor_state = CursorState::new(&gpu.device, cursor_config);
+        let cursor_pipeline = create_cursor_pipeline(
+            &gpu.device,
+            &cursor_state.bind_group_layout,
+            gpu.config.format,
+        );
+
         Ok(Self {
             device: gpu.device,
             queue: gpu.queue,
@@ -84,6 +97,8 @@ impl<'a> Renderer<'a> {
             render_pipeline,
             vertex_buffer,
             scroll_offset: 0,
+            cursor_state,
+            cursor_pipeline,
         })
     }
 
@@ -113,12 +128,18 @@ impl<'a> Renderer<'a> {
 
     /// Render a frame with terminal content
     pub fn render<T>(&mut self, term: Option<Arc<Mutex<Term<T>>>>) -> Result<()> {
+        // Update cursor blink state
+        let blink_changed = self.cursor_state.update_blink();
+
         // Render terminal text to texture
         if let Some(term_arc) = &term {
             log::debug!("Attempting to lock terminal for rendering");
             if let Some(term_lock) = term_arc.try_lock() {
                 log::debug!("Terminal locked, rendering to texture");
                 self.render_terminal_to_texture(&term_lock)?;
+                
+                // Update cursor position
+                self.update_cursor_position(&term_lock);
             } else {
                 log::warn!("Could not lock terminal for rendering");
             }
@@ -126,8 +147,42 @@ impl<'a> Renderer<'a> {
             log::warn!("No terminal provided to render");
         }
 
+        // Upload cursor uniforms if blink changed
+        if blink_changed {
+            self.cursor_state.upload_uniforms(&self.queue);
+        }
+
         self.execute_render_pass()?;
         Ok(())
+    }
+
+    /// Update cursor position based on terminal state
+    fn update_cursor_position<T>(&mut self, term: &Term<T>) {
+        let cursor_pos = term.grid().cursor.point;
+        // Cursor visibility is managed by the terminal's mode
+        // For now, we'll show cursor unless we're in alternate screen without focus
+        let hide_cursor = false;
+        
+        let line_metrics = self.font_manager.font()
+            .horizontal_line_metrics(self.font_manager.font_size())
+            .unwrap();
+        let cell_width = self.font_manager.font()
+            .metrics('M', self.font_manager.font_size())
+            .advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+        self.cursor_state.update_position(
+            cursor_pos,
+            cell_width,
+            cell_height,
+            self.config.width,
+            self.config.height,
+            self.scroll_offset,
+            hide_cursor,
+        );
+        
+        // Upload uniforms to GPU
+        self.cursor_state.upload_uniforms(&self.queue);
     }
 
     /// Execute the GPU render pass to draw the frame
@@ -172,6 +227,14 @@ impl<'a> Renderer<'a> {
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             log::trace!("Drawing 6 vertices for fullscreen quad");
             render_pass.draw(0..6, 0..1);
+            
+            // Draw cursor overlay
+            if self.cursor_state.is_visible() {
+                log::trace!("Drawing cursor overlay");
+                render_pass.set_pipeline(&self.cursor_pipeline);
+                render_pass.set_bind_group(0, &self.cursor_state.bind_group, &[]);
+                render_pass.draw(0..6, 0..1);
+            }
         }
         
         log::trace!("Submitting command buffer and presenting frame...");

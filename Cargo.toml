@@ -51,6 +51,7 @@ anyhow = "1.0"
 thiserror = "1.0"
 parking_lot = "0.12"
 bitflags = "2.4"
+bytemuck = { version = "1.14", features = ["derive"] }
 
 [profile.release]
 opt-level = 3
