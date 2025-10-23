@@ -128,7 +128,8 @@ impl CursorState {
         hide_cursor: bool,
     ) {
         // Hide cursor if scrolled or terminal mode requests it
-        let should_hide = scroll_offset > 0 || hide_cursor;
+        // Unless force_show is enabled (overrides application hide requests)
+        let should_hide = scroll_offset > 0 || (hide_cursor && !self.config.force_show);
         
         // Calculate pixel position in screen coordinates
         // cursor_pos.line is in grid coordinates (0-indexed from visible top)

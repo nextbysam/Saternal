@@ -25,6 +25,10 @@ pub struct CursorConfig {
     pub blink_interval_ms: u64,
     /// Cursor color (RGBA, values 0.0-1.0)
     pub color: [f32; 4],
+    /// Force show cursor even when applications request to hide it
+    /// Useful for TUI apps that don't properly manage cursor visibility
+    #[serde(default)]
+    pub force_show: bool,
 }
 
 impl Default for CursorConfig {
@@ -34,6 +38,7 @@ impl Default for CursorConfig {
             blink: true,
             blink_interval_ms: 530, // Standard terminal blink rate
             color: [1.0, 1.0, 1.0, 0.8], // White with 80% opacity
+            force_show: false, // Respect application hide commands by default
         }
     }
 }
