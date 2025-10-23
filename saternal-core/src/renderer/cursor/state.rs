@@ -130,12 +130,11 @@ impl CursorState {
         // Hide cursor if scrolled or terminal mode requests it
         let should_hide = scroll_offset > 0 || hide_cursor;
         
-        // Calculate pixel position
-        // BUGFIX: cursor_pos.line appears to be 0-indexed from top,
-        // but there's an off-by-one where cursor renders 1 line above text
-        // Adding 1 to correct the alignment
+        // Calculate pixel position in screen coordinates
+        // cursor_pos.line is in grid coordinates (0-indexed from visible top)
+        // When not scrolled, line 0 should render at pixel row 0
         let pixel_x = cursor_pos.column.0 as f32 * cell_width;
-        let pixel_y = (cursor_pos.line.0 + scroll_offset as i32 + 1) as f32 * cell_height;
+        let pixel_y = cursor_pos.line.0 as f32 * cell_height;
 
         // Convert to normalized device coordinates (-1 to 1)
         let ndc_x = (pixel_x / window_width as f32) * 2.0 - 1.0;

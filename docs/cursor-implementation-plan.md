@@ -642,14 +642,395 @@ color = [1.0, 1.0, 1.0, 0.8] # White with 80% opacity
 - [ ] Cursor color customization works
 
 **Remaining Work:**
-- [ ] Add ANSI escape sequence support for cursor style changes
+- [x] Add ANSI escape sequence support for cursor visibility (DECTCEM) - **FIXED**
+- [ ] Add ANSI escape sequence support for cursor style changes (DECSCUSR)
 - [ ] Add focus state handling (dim cursor when unfocused)
 - [ ] Add cursor color inversion for block style
 - [ ] Performance profiling under heavy load
 
 ---
 
-**Document Status:** Implementation Complete (with fixes)
-**Last Updated:** 2025-10-24
+## Issue #3: Cursor Not Visible in Claude CLI (FIXED - 2025-10-24)
+
+### Problem Description
+
+The cursor works correctly in basic terminal usage but disappears when running TUI applications like Claude CLI. The cursor would render and blink normally when typing basic commands, but would not appear when Claude CLI or similar applications were running.
+
+### Root Cause Analysis
+
+**Location:** `saternal-core/src/renderer/mod.rs:166`
+
+The `hide_cursor` variable was hardcoded to `false`:
+
+```rust
+fn update_cursor_position<T>(&mut self, term: &Term<T>) {
+    let cursor_pos = term.grid().cursor.point;
+
+    // Cursor visibility is managed by the terminal's mode
+    // For now, we'll show cursor unless we're in alternate screen without focus
+    let hide_cursor = false;  // ❌ HARDCODED - IGNORES TERMINAL STATE
+
+    // ... rest of function
+}
+```
+
+**Why this caused the issue:**
+
+1. TUI applications like Claude CLI send ANSI escape sequences to control cursor visibility:
+   - `CSI ? 25 h` (`\x1b[?25h`) - Show cursor (DECTCEM enable)
+   - `CSI ? 25 l` (`\x1b[?25l`) - Hide cursor (DECTCEM disable)
+
+2. `alacritty_terminal` correctly parses these sequences and updates its internal `TermMode::SHOW_CURSOR` flag
+
+3. **BUT** Saternal was ignoring this flag, always treating the cursor as visible
+
+4. Claude CLI (and many TUI apps) hide the cursor during rendering to prevent flickering, then show it again when needed. Since Saternal wasn't respecting the hide request, it would show the cursor in the wrong places or not show it at all when Claude CLI expected it to be visible.
+
+### How Terminal Mode Flags Work
+
+Terminal emulators use **DECTCEM (DEC Text Cursor Enable Mode)** to control cursor visibility:
+
+```rust
+// From alacritty_terminal/src/term/mod.rs
+bitflags! {
+    pub struct TermMode: u32 {
+        const SHOW_CURSOR = 0b0000_0000_0000_0001;
+        const VI = 0b0000_0000_0000_0010;
+        // ... other modes
+    }
+}
+```
+
+**Positive logic:** Flag present = cursor visible, flag absent = cursor hidden
+
+**ANSI handlers in alacritty_terminal:**
+```rust
+// CSI ? 25 h - Show cursor
+Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::ShowCursor)) => {
+    self.mode.insert(TermMode::SHOW_CURSOR);
+}
+
+// CSI ? 25 l - Hide cursor
+Mode::UnsetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::ShowCursor)) => {
+    self.mode.remove(TermMode::SHOW_CURSOR);
+}
+```
+
+### The Fix
+
+**Before:**
+```rust
+let hide_cursor = false;
+```
+
+**After:**
+```rust
+use alacritty_terminal::term::TermMode;
+
+// Check terminal's DECTCEM mode flag
+let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR);
+```
+
+**Complete updated function:**
+```rust
+fn update_cursor_position<T>(&mut self, term: &Term<T>) {
+    let cursor_pos = term.grid().cursor.point;
+
+    // Cursor visibility is managed by the terminal's DECTCEM mode (CSI ? 25 h/l)
+    // SHOW_CURSOR flag present = visible, absent = hidden
+    let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR);
+
+    let line_metrics = self.font_manager.font()
+        .horizontal_line_metrics(self.font_manager.font_size())
+        .unwrap();
+    let cell_width = self.font_manager.font()
+        .metrics('M', self.font_manager.font_size())
+        .advance_width;
+    let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+    self.cursor_state.update_position(
+        cursor_pos,
+        cell_width,
+        cell_height,
+        self.config.width,
+        self.config.height,
+        self.scroll_offset,
+        hide_cursor,
+    );
+
+    // Upload uniforms to GPU
+    self.cursor_state.upload_uniforms(&self.queue);
+}
+```
+
+**Required import at top of file:**
+```rust
+use alacritty_terminal::term::TermMode;
+```
+
+### How Other Terminal Emulators Handle This
+
+#### Alacritty
+```rust
+// From alacritty/src/display/mod.rs
+impl RenderableCursor {
+    pub fn new<T>(term: &Term<T>, config: &UiConfig) -> Option<Self> {
+        let vi_mode = term.mode().contains(TermMode::VI);
+
+        // Hide cursor if SHOW_CURSOR flag is not set
+        if !vi_mode && !term.mode().contains(TermMode::SHOW_CURSOR) {
+            return None;  // Don't render cursor
+        }
+
+        Some(RenderableCursor {
+            shape: term.cursor_style().shape,
+            point: term.grid().cursor.point,
+        })
+    }
+}
+```
+
+#### Wezterm
+```rust
+// From wezterm/term/src/terminalstate/mod.rs
+pub struct TerminalState {
+    cursor_visible: bool,  // Managed by DECTCEM sequences
+    // ...
+}
+
+// DECTCEM handlers
+Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::ShowCursor)) => {
+    self.cursor_visible = true;
+}
+
+Mode::ResetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::ShowCursor)) => {
+    self.cursor_visible = false;
+}
+```
+
+#### Kitty
+```c
+// From kitty/screen.c
+static const ScreenModes empty_modes = {
+    .mDECTCEM=true,  // Cursor visible by default
+    // ...
+};
+```
+
+### Common TUI Application Patterns
+
+Many TUI applications follow this pattern:
+
+1. **Enter alternate screen + hide cursor:**
+   ```bash
+   printf '\x1b[?1049h\x1b[?25l'
+   ```
+
+2. **Do rendering:**
+   - Update screen content
+   - Position cursor where needed
+
+3. **Show cursor at input position:**
+   ```bash
+   printf '\x1b[?25h'
+   ```
+
+4. **Exit and cleanup:**
+   ```bash
+   printf '\x1b[?1049l\x1b[?25h'
+   ```
+
+**Why Claude CLI was affected:**
+- Claude CLI likely hides cursor during rendering
+- Shows cursor when waiting for input
+- Since Saternal wasn't respecting these commands, the cursor state was wrong
+
+### Testing
+
+**Test DECTCEM sequences:**
+```bash
+# Test 1: Basic hide/show
+printf '\x1b[?25l'  # Hide cursor
+sleep 2
+printf '\x1b[?25h'  # Show cursor
+
+# Test 2: Multiple toggles
+for i in {1..5}; do
+    printf '\x1b[?25l'; sleep 0.5
+    printf '\x1b[?25h'; sleep 0.5
+done
+
+# Test 3: With alternate screen
+printf '\x1b[?1049h\x1b[?25l'  # Enter alt screen, hide cursor
+read -p "Cursor should be hidden. Press enter..."
+printf '\x1b[?1049l\x1b[?25h'  # Exit, show cursor
+```
+
+**Test with real applications:**
+- `vim` - Cursor should show in insert mode, hide in normal mode
+- `htop` - Cursor should be hidden
+- `less` - Cursor should be hidden while viewing
+- `claude` - Cursor should show at input prompt
+- `nano` - Cursor should show at edit position
+
+### Architecture Impact
+
+This fix maintains the existing architecture:
+
+1. **Terminal state management** - `alacritty_terminal` handles ANSI parsing ✅
+2. **Renderer reads state** - Our renderer checks terminal mode flags ✅
+3. **GPU shader respects visibility** - `CursorState.update_position()` sets visibility ✅
+4. **Shader discards when hidden** - `cursor.wgsl` checks `visible` uniform ✅
+
+The entire pipeline was correctly built, just missing the mode flag check at the top.
+
+### Additional Considerations
+
+#### Vi Mode Support (Future)
+
+Alacritty also supports vi mode for visual selection:
+
+```rust
+let vi_mode = term.mode().contains(TermMode::VI);
+// In vi mode, cursor rendering may change
+```
+
+#### Window Focus (Future)
+
+Some terminals dim or hide cursor when window loses focus:
+
+```rust
+let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR)
+    || (!self.is_focused && !self.config.cursor_render_when_unfocused);
+```
+
+#### Cursor Style Changes (Future - DECSCUSR)
+
+Applications can change cursor style dynamically:
+- `CSI 1 SP q` - Blinking block
+- `CSI 2 SP q` - Steady block
+- `CSI 3 SP q` - Blinking underline
+- `CSI 4 SP q` - Steady underline
+- `CSI 5 SP q` - Blinking bar
+- `CSI 6 SP q` - Steady bar
+
+This requires reading `term.cursor_style()` and updating `CursorConfig.style` dynamically.
+
+### Verification
+
+After implementing the fix, verify:
+
+- [x] Cursor visibility follows DECTCEM sequences
+- [x] Cursor hides when `CSI ? 25 l` is sent
+- [x] Cursor shows when `CSI ? 25 h` is sent
+- [x] Cursor still hides when scrolling (existing logic preserved)
+- [x] Claude CLI cursor works correctly
+- [x] Cursor positioning fixed (removed +1 offset hack)
+- [ ] Other TUI applications (vim, htop, less) work correctly
+
+---
+
+## Reference: Terminal Mode Flags
+
+### All TermMode Flags in alacritty_terminal
+
+```rust
+bitflags! {
+    pub struct TermMode: u32 {
+        const SHOW_CURSOR          = 0b0000_0000_0000_0001;  // DECTCEM
+        const APP_CURSOR           = 0b0000_0000_0000_0010;  // DECCKM
+        const APP_KEYPAD           = 0b0000_0000_0000_0100;  // DECPNM
+        const MOUSE_REPORT_CLICK   = 0b0000_0000_0000_1000;
+        const BRACKETED_PASTE      = 0b0000_0000_0001_0000;
+        const SGR_MOUSE            = 0b0000_0000_0010_0000;
+        const MOUSE_MOTION         = 0b0000_0000_0100_0000;
+        const LINE_WRAP            = 0b0000_0000_1000_0000;  // DECAWM
+        const LINE_FEED_NEW_LINE   = 0b0000_0001_0000_0000;  // LNM
+        const ORIGIN               = 0b0000_0010_0000_0000;  // DECOM
+        const INSERT               = 0b0000_0100_0000_0000;  // IRM
+        const FOCUS_IN_OUT         = 0b0000_1000_0000_0000;
+        const ALT_SCREEN           = 0b0001_0000_0000_0000;
+        const MOUSE_DRAG           = 0b0010_0000_0000_0000;
+        const MOUSE_MODE           = 0b0100_0000_0000_0000;
+        const UTF8_MOUSE           = 0b1000_0000_0000_0000;
+        const ALTERNATE_SCROLL     = 0b0001_0000_0000_0000_0000;
+        const VI                   = 0b0010_0000_0000_0000_0000;
+        const URGENCY_HINTS        = 0b0100_0000_0000_0000_0000;
+    }
+}
+```
+
+**Most relevant for cursor rendering:**
+- `SHOW_CURSOR` - Controlled by DECTCEM (CSI ? 25 h/l)
+- `VI` - Vi/visual selection mode
+- `ALT_SCREEN` - Alternate screen buffer active
+- `FOCUS_IN_OUT` - Focus events enabled
+
+---
+
+## Issue #4: Cursor Positioning Off-by-One (FIXED - 2025-10-23)
+
+### Problem Description
+
+In `saternal-core/src/renderer/cursor/state.rs`, there was a +1 offset hack applied to cursor positioning:
+
+```rust
+let pixel_y = (cursor_pos.line.0 + scroll_offset as i32 + 1) as f32 * cell_height;
+```
+
+This was added as a band-aid fix because the cursor appeared to render one line above the actual text position.
+
+### Root Cause
+
+The +1 offset was compensating for a misunderstanding of the coordinate system:
+- `cursor_pos.line` is already in screen coordinates (0 = top visible line)
+- No adjustment is needed when scroll_offset is 0
+- The +1 was masking the real issue or was left over from debugging
+
+### The Fix
+
+**Location:** `saternal-core/src/renderer/cursor/state.rs:136-137`
+
+**Before:**
+```rust
+// BUGFIX: cursor_pos.line appears to be 0-indexed from top,
+// but there's an off-by-one where cursor renders 1 line above text
+// Adding 1 to correct the alignment
+let pixel_y = (cursor_pos.line.0 + scroll_offset as i32 + 1) as f32 * cell_height;
+```
+
+**After:**
+```rust
+// Calculate pixel position in screen coordinates
+// cursor_pos.line is in grid coordinates (0-indexed from visible top)
+// When not scrolled, line 0 should render at pixel row 0
+let pixel_y = cursor_pos.line.0 as f32 * cell_height;
+```
+
+### Coordinate System Clarification
+
+**Terminal Grid Coordinates:**
+- `cursor_pos.line.0` = 0 means top visible line
+- Negative values access history (when scrolled)
+- Always 0-indexed from the visible top
+
+**Screen Pixel Coordinates:**
+- `pixel_y = 0` is top of window
+- Direct multiplication: `line_index * cell_height`
+- No offset needed for normal rendering
+
+**Text Rasterizer Comparison:**
+```rust
+// text_rasterizer.rs applies scroll_offset to access grid:
+let line = Line(row_idx as i32 - scroll_offset as i32);
+
+// But cursor position from terminal is already in visible coordinates
+// So we just convert line number to pixels directly
+```
+
+---
+
+**Document Status:** Implementation Complete (visibility + positioning fixes)
+**Last Updated:** 2025-10-23
 **Author:** Claude (AI Assistant)
 **For:** Saternal Terminal Emulator Project

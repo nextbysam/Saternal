@@ -7,7 +7,7 @@ mod texture;
 
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::term::Term;
+use alacritty_terminal::term::{Term, TermMode};
 use anyhow::Result;
 use log::info;
 use parking_lot::Mutex;
@@ -161,9 +161,9 @@ impl<'a> Renderer<'a> {
     fn update_cursor_position<T>(&mut self, term: &Term<T>) {
         let cursor_pos = term.grid().cursor.point;
         
-        // Cursor visibility is managed by the terminal's mode
-        // For now, we'll show cursor unless we're in alternate screen without focus
-        let hide_cursor = false;
+        // Cursor visibility is managed by the terminal's DECTCEM mode (CSI ? 25 h/l)
+        // SHOW_CURSOR flag present = visible, absent = hidden
+        let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR);
         
         let line_metrics = self.font_manager.font()
             .horizontal_line_metrics(self.font_manager.font_size())
