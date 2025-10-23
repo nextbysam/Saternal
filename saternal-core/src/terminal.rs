@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// Wrapper around Alacritty's terminal emulator
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventListener>>>,
-    pty: Box<dyn Pty>,
+    pty: Box<dyn tty::EventedPty>,
     notifier: Notifier,
 }
 
@@ -57,7 +57,7 @@ impl Terminal {
     }
 
     /// Get the PTY for I/O operations
-    pub fn pty(&self) -> &dyn Pty {
+    pub fn pty(&self) -> &dyn tty::EventedPty {
         self.pty.as_ref()
     }
 
@@ -68,14 +68,14 @@ impl Terminal {
         let mut term = self.term.lock();
         term.resize((cols, rows));
 
-        let window_size = tty::WindowSize {
+        let window_size = alacritty_terminal::event::WindowSize {
             num_cols: cols as u16,
             num_lines: rows as u16,
             cell_width: 8,  // Will be updated by renderer
             cell_height: 16, // Will be updated by renderer
         };
 
-        self.pty.on_resize(&window_size);
+        self.pty.on_resize(window_size);
 
         Ok(())
     }

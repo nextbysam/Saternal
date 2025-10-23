@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use fontdue::{Font, FontSettings};
 use log::info;
 use std::collections::HashMap;
