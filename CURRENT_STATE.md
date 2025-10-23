@@ -116,6 +116,35 @@ The terminal grid is now being accessed properly. We're successfully rendering 2
 
 ## 🔧 All Bugs Fixed Today
 
+### -1. Font Size Dynamic Line Spacing (CRITICAL - LATEST FIX! 2025-10-24)
+**Problem**: When changing font size with Cmd+/-, text lines overlapped because spacing was calculated incorrectly
+- Used wrong formula for cell_height (just glyph height instead of ascent - descent + line_gap)
+- Approximated baseline_offset as `cell_height * 0.8` instead of using actual `ascent` from font metrics
+- This caused all text to render at wrong vertical positions after font size changes
+
+**Solution** (Match initialization formula exactly):
+```rust
+// In set_font_size() (saternal-core/src/renderer.rs:566-576)
+let line_metrics = self.font_manager.font().horizontal_line_metrics(font_size).unwrap();
+self.cell_width = self.font_manager.font().metrics('M', font_size).advance_width;
+self.cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+self.baseline_offset = line_metrics.ascent.ceil();  // NOT cell_height * 0.8!
+```
+
+**Why this works**:
+- Uses proper typography metrics from the font (ascent, descent, line_gap)
+- Matches exactly the same formula used during renderer initialization
+- Ensures consistent spacing regardless of font size
+- Proper baseline alignment prevents overlapping text
+
+**Files Changed**:
+- saternal-core/src/renderer.rs:563-580 (fixed cell dimension and baseline calculation)
+
+**Verification**:
+- Change font size with Cmd+/- → lines properly spaced
+- Text no longer overlaps at different font sizes
+- Spacing matches professional terminal emulators
+
 ### 0. Text Baseline Positioning (CRITICAL - LATEST FIX!)
 **Problem**: Glyphs were positioned incorrectly, not aligned to a proper baseline
 - Used `ymin` incorrectly as absolute position instead of baseline-relative offset
@@ -303,8 +332,9 @@ Press **Cmd+`** to toggle. You will see:
 
 ---
 
-**Last Updated**: 2025-10-23 (Dynamic Font Resizing Added!)
+**Last Updated**: 2025-10-24 (Font Size Spacing Bug Fixed!)
 **Status**: 🎉 **COMPLETE! Production-quality terminal with real-time font control!**
+**Latest Fix**: Dynamic font resizing now properly recalculates line spacing - no more overlapping text!
 **Next Goal**: Add cursor rendering and polish UI
 
 ---

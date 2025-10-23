@@ -563,13 +563,17 @@ impl<'a> Renderer<'a> {
         // Update font manager
         self.font_manager.set_font_size(font_size);
         
-        // Recalculate cell dimensions
-        let (width, height) = self.font_manager.cell_dimensions();
-        self.cell_width = width as f32;
-        self.cell_height = height as f32;
+        // Recalculate cell dimensions using the SAME formula as initialization
+        // This ensures proper line spacing and baseline alignment
+        let line_metrics = self.font_manager.font().horizontal_line_metrics(font_size).unwrap();
+        self.cell_width = self.font_manager.font().metrics('M', font_size).advance_width;
+        self.cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         
-        // Calculate baseline offset (approximate as 80% of height)
-        self.baseline_offset = self.cell_height * 0.8;
+        // Baseline is positioned from the top of the cell by the ascent value (NOT an approximation!)
+        self.baseline_offset = line_metrics.ascent.ceil();
+        
+        info!("Font size updated to {}: cell={}x{}, baseline={}", 
+              font_size, self.cell_width, self.cell_height, self.baseline_offset);
         
         // Recreate vertex buffer with new dimensions
         self.recreate_vertex_buffer()?;
