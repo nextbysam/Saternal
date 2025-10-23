@@ -19,6 +19,8 @@ pub struct Renderer<'a> {
     font_manager: FontManager,
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     cell_width: f32,
@@ -282,6 +284,8 @@ impl<'a> Renderer<'a> {
             font_manager,
             texture,
             bind_group,
+            bind_group_layout,
+            sampler,
             render_pipeline,
             vertex_buffer,
             cell_width,
@@ -547,9 +551,51 @@ impl<'a> Renderer<'a> {
     /// Resize the renderer
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
+            info!("Resizing renderer to {}x{}", width, height);
+            
+            // Update surface configuration
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+            
+            // Recreate texture with new dimensions
+            let texture_size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            
+            self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Text Texture"),
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            
+            // Recreate texture view
+            let texture_view = self.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            
+            // Recreate bind group with new texture view
+            self.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Texture Bind Group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            
+            info!("Renderer resized successfully");
         }
     }
 
