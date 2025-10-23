@@ -59,17 +59,25 @@ impl DropdownWindow {
         // but can receive key events when visible
         let () = msg_send![ns_window, setHidesOnDeactivate:NO];
 
-        // Enable vibrancy/blur effect FIRST (so it's behind the Metal layer)
-        self.enable_vibrancy(ns_window)?;
+        // CRITICAL: Don't make window transparent - this prevents Metal from rendering
+        // The window needs to be opaque for the Metal layer to be visible
+        // We'll handle transparency through the rendering itself
+        let () = msg_send![ns_window, setOpaque:YES];
 
-        // Make window transparent so the Metal layer can render on top of vibrancy
-        let () = msg_send![ns_window, setOpaque:NO];
-        let () = msg_send![ns_window, setBackgroundColor:nil];
+        // Set a black background so we can see if Metal is rendering
+        let black_color: id = msg_send![class!(NSColor), blackColor];
+        let () = msg_send![ns_window, setBackgroundColor:black_color];
 
         info!("Configured dropdown window: {}x{} at ({}, {})",
               window_width, window_height, window_x, window_y);
 
         Ok(())
+    }
+
+    /// Enable vibrancy after wgpu surface is created
+    /// Call this AFTER the renderer is initialized
+    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id) -> Result<()> {
+        self.enable_vibrancy(ns_window)
     }
 
     /// Enable vibrancy (background blur) effect
@@ -91,10 +99,14 @@ impl DropdownWindow {
         let material: i64 = 2;
         let () = msg_send![visual_effect_view, setMaterial:material];
 
+        // Set state to active
+        let () = msg_send![visual_effect_view, setState:1i64]; // NSVisualEffectStateActive = 1
+
         // Set autoresizing mask
         let () = msg_send![visual_effect_view, setAutoresizingMask:0x12]; // Width + Height sizable
 
-        // Add as subview (NSWindowBelow = -1 to place it behind other views)
+        // CRITICAL: Insert at index 0 (bottom of the view hierarchy) so wgpu's Metal layer renders on top
+        // Using addSubview:positioned:relativeTo: with NSWindowBelow (-1)
         let () = msg_send![content_view, addSubview:visual_effect_view positioned:(-1i64) relativeTo:nil];
 
         Ok(())

@@ -44,7 +44,7 @@ impl<'a> App<'a> {
         let window = WindowBuilder::new()
             .with_title("Saternal")
             .with_decorations(false)
-            .with_transparent(true)
+            .with_transparent(false) // CRITICAL: Must be opaque for Metal to render
             .with_visible(false) // Start hidden
             .build(&event_loop)?;
 
@@ -106,7 +106,20 @@ impl<'a> App<'a> {
         )
         .await?;
         let renderer = Arc::new(Mutex::new(renderer));
-        
+
+        // IMPORTANT: Add vibrancy layer AFTER wgpu creates its Metal layer
+        // This ensures the vibrancy is behind the Metal rendering surface
+        info!("Adding vibrancy layer behind Metal surface");
+        unsafe {
+            if let Ok(handle) = window.window_handle() {
+                if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
+                    let ns_view = appkit_handle.ns_view.as_ptr() as id;
+                    let ns_window: id = msg_send![ns_view, window];
+                    dropdown.lock().enable_vibrancy_layer(ns_window)?;
+                }
+            }
+        }
+
         Ok(Self {
             config,
             event_loop,

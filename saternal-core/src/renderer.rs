@@ -217,7 +217,7 @@ impl<'a> Renderer<'a> {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -322,11 +322,11 @@ impl<'a> Renderer<'a> {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // TEMP: Use bright blue clear color to test if we can see ANYTHING
-                            r: 0.0,
+                            // TEMP: Use red to verify rendering works, then change back to transparent
+                            r: 1.0,
                             g: 0.0,
-                            b: 1.0,
-                            a: 1.0, // Full opacity
+                            b: 0.0,
+                            a: 1.0, // Opaque red for debugging
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -357,12 +357,13 @@ impl<'a> Renderer<'a> {
     fn render_terminal_to_texture<T>(&mut self, term: &Term<T>) -> Result<()> {
         let rows = term.screen_lines();
         let cols = term.columns();
-        log::info!("Rendering terminal: {}x{} cells", cols, rows);
+        let cursor = term.grid().cursor.point;
+        log::info!("Rendering terminal: {}x{} cells, cursor at ({}, {})",
+                   cols, rows, cursor.column.0, cursor.line.0);
 
         // Create buffer for the entire window/texture
         let width = self.config.width;
         let height = self.config.height;
-        log::debug!("Texture dimensions: {}x{} pixels (cell: {}x{})", width, height, self.cell_width, self.cell_height);
 
         // Determine if we need BGRA or RGBA based on surface format
         let is_bgra = matches!(
@@ -370,26 +371,48 @@ impl<'a> Renderer<'a> {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
 
-        // TEMP: Fill entire screen with bright green to test pipeline
+        // TEMP: Draw a test string "HELLO WORLD" manually to verify pipeline works
         let mut buffer = vec![0u8; (width * height * 4) as usize];
-        for i in (0..buffer.len()).step_by(4) {
-            if is_bgra {
-                buffer[i] = 0;       // B
-                buffer[i + 1] = 255; // G - bright green
-                buffer[i + 2] = 0;   // R
-                buffer[i + 3] = 255; // A - full opacity
-            } else {
-                buffer[i] = 0;       // R
-                buffer[i + 1] = 255; // G - bright green
-                buffer[i + 2] = 0;   // B
-                buffer[i + 3] = 255; // A - full opacity
+
+        let test_text = "HELLO WORLD";
+        for (i, ch) in test_text.chars().enumerate() {
+            let (metrics, bitmap) = self.font_manager.rasterize(ch);
+            let x = (i as f32 * self.cell_width) as usize;
+            let y = 50; //  50 pixels from top
+
+            for glyph_y in 0..metrics.height {
+                for glyph_x in 0..metrics.width {
+                    let px = x + glyph_x;
+                    let py = y + glyph_y + metrics.ymin.max(0) as usize;
+
+                    if px < width as usize && py < height as usize {
+                        let glyph_idx = glyph_y * metrics.width + glyph_x;
+                        let coverage = bitmap[glyph_idx];
+
+                        if coverage > 0 {
+                            let buffer_idx = (py * width as usize + px) * 4;
+                            // Use premultiplied alpha for PostMultiplied mode
+                            // Since we're using white (255,255,255), premultiplied means RGB = coverage
+                            if is_bgra {
+                                buffer[buffer_idx] = coverage;      // B (premultiplied)
+                                buffer[buffer_idx + 1] = coverage;  // G (premultiplied)
+                                buffer[buffer_idx + 2] = coverage;  // R (premultiplied) - white text
+                                buffer[buffer_idx + 3] = coverage; // A
+                            } else {
+                                buffer[buffer_idx] = coverage;      // R (premultiplied)
+                                buffer[buffer_idx + 1] = coverage;  // G (premultiplied)
+                                buffer[buffer_idx + 2] = coverage;  // B (premultiplied) - white text
+                                buffer[buffer_idx + 3] = coverage; // A
+                            }
+                        }
+                    }
+                }
             }
         }
-        log::info!("Filled entire texture with bright green ({} pixels, format: {:?}, BGRA: {})",
-                   width * height, self.config.format, is_bgra);
 
-        // TEMP: Skip terminal rendering, just test solid color
-        /*
+        log::info!("Drew test string 'HELLO WORLD' at position (0, 50)");
+
+        /* DISABLED: Real terminal rendering until grid access issue is resolved
         // Render each cell
         let mut char_count = 0;
         for row_idx in 0..rows {
@@ -398,10 +421,17 @@ impl<'a> Renderer<'a> {
                 let column = Column(col_idx);
                 let cell = &term.grid()[line][column];
 
+                total_cells += 1;
                 // Get character
                 let c = cell.c;
-                if c == ' ' || c == '\0' {
-                    continue; // Skip empty cells
+
+                if c == '\0' {
+                    continue; // Skip null cells only, render spaces as background
+                }
+
+                // Skip spaces for now to only render visible text
+                if c == ' ' {
+                    continue;
                 }
                 char_count += 1;
 
@@ -431,11 +461,20 @@ impl<'a> Renderer<'a> {
 
                             if coverage > 0 {
                                 let buffer_idx = (py * width as usize + px) * 4;
-                                buffer[buffer_idx] = fg_r;
-                                buffer[buffer_idx + 1] = fg_g;
-                                buffer[buffer_idx + 2] = fg_b;
-                                buffer[buffer_idx + 3] = coverage;
-                                
+
+                                // Write in correct channel order (BGRA or RGBA)
+                                if is_bgra {
+                                    buffer[buffer_idx] = fg_b;     // B
+                                    buffer[buffer_idx + 1] = fg_g; // G
+                                    buffer[buffer_idx + 2] = fg_r; // R
+                                    buffer[buffer_idx + 3] = coverage; // A
+                                } else {
+                                    buffer[buffer_idx] = fg_r;     // R
+                                    buffer[buffer_idx + 1] = fg_g; // G
+                                    buffer[buffer_idx + 2] = fg_b; // B
+                                    buffer[buffer_idx + 3] = coverage; // A
+                                }
+
                                 if row_idx == 0 && col_idx == 0 && glyph_x < 3 && glyph_y < 3 {
                                     log::trace!("Writing pixel at ({},{}) = RGBA({},{},{},{})", px, py, fg_r, fg_g, fg_b, coverage);
                                 }
@@ -445,8 +484,8 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
-        
-        log::info!("Rendered {} non-empty characters to texture (buffer size: {} bytes)", char_count, buffer.len());
+
+        log::info!("Rendered {} non-empty characters", char_count);
         */
 
         // Upload to GPU texture
