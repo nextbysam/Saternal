@@ -13,17 +13,17 @@ use winit::{
 };
 
 /// Main application state
-pub struct App {
+pub struct App<'a> {
     config: Config,
     event_loop: EventLoop<()>,
     window: Arc<winit::window::Window>,
-    renderer: Arc<Mutex<Renderer>>,
+    renderer: Arc<Mutex<Renderer<'a>>>,
     tab_manager: Arc<Mutex<TabManager>>,
     dropdown: Arc<Mutex<DropdownWindow>>,
     hotkey_manager: Arc<HotkeyManager>,
 }
 
-impl App {
+impl<'a> App<'a> {
     /// Create a new application
     pub async fn new(config: Config) -> Result<Self> {
         info!("Initializing application");

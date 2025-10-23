@@ -8,4 +8,4 @@ pub use config::Config;
 pub use font::FontManager;
 pub use pane::{Pane, PaneNode, SplitDirection};
 pub use renderer::Renderer;
-pub use terminal::Terminal;
+pub use terminal::{Terminal, TermEventListener};
