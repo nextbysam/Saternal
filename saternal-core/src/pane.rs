@@ -146,7 +146,7 @@ impl PaneNode {
                 match direction {
                     SplitDirection::Horizontal => {
                         // Split height
-                        let height1 = (height as f32 * ratio) as usize;
+                        let height1 = (height as f32 * *ratio) as usize;
                         let height2 = height.saturating_sub(height1);
                         if let Some(child1) = children.get_mut(0) {
                             child1.resize(width, height1)?;
@@ -157,7 +157,7 @@ impl PaneNode {
                     }
                     SplitDirection::Vertical => {
                         // Split width
-                        let width1 = (width as f32 * ratio) as usize;
+                        let width1 = (width as f32 * *ratio) as usize;
                         let width2 = width.saturating_sub(width1);
                         if let Some(child1) = children.get_mut(0) {
                             child1.resize(width1, height)?;

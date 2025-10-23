@@ -1,19 +1,19 @@
 use alacritty_terminal::{
-    event::EventListener,
+    event::{EventListener, OnResize},
     grid::Dimensions,
-    term::{Config as TermConfig, SizeInfo, Term},
+    term::{test::TermSize, Config as TermConfig, Term},
     tty,
     vte::ansi::Processor,
 };
 use anyhow::Result;
 use log::{debug, info};
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::{collections::HashMap, fs::File, sync::Arc};
 
 /// Wrapper around Alacritty's terminal emulator
 pub struct Terminal {
     term: Arc<Mutex<Term<TermEventListener>>>,
-    pty: Box<dyn tty::EventedPty>,
+    pty: Box<dyn tty::EventedPty<Reader = File, Writer = File>>,
     processor: Processor,
 }
 
@@ -26,6 +26,8 @@ impl Terminal {
         let pty_config = tty::Options {
             shell: shell.map(|s| tty::Shell::new(s, vec![])),
             working_directory: None,
+            drain_on_exit: true,
+            env: HashMap::new(),
         };
 
         let window_size = alacritty_terminal::event::WindowSize {
@@ -37,18 +39,10 @@ impl Terminal {
 
         let pty = tty::new(&pty_config, window_size, 0)?;
 
-        // Create terminal with SizeInfo
+        // Create terminal with TermSize
         let event_listener = TermEventListener::new();
-        let size_info = SizeInfo::new(
-            cols as f32 * 8.0,   // width in pixels
-            rows as f32 * 16.0,  // height in pixels
-            8.0,                  // cell width
-            16.0,                 // cell height
-            0.0,                  // padding x
-            0.0,                  // padding y
-            false,                // dynamic title
-        );
-        let term = Term::new(TermConfig::default(), &size_info, event_listener);
+        let size = TermSize::new(cols, rows);
+        let term = Term::new(TermConfig::default(), &size, event_listener);
 
         let term = Arc::new(Mutex::new(term));
 
@@ -57,7 +51,7 @@ impl Terminal {
 
         Ok(Self {
             term,
-            pty,
+            pty: Box::new(pty),
             processor,
         })
     }
@@ -68,7 +62,7 @@ impl Terminal {
     }
 
     /// Get the PTY for I/O operations
-    pub fn pty(&self) -> &dyn tty::EventedPty {
+    pub fn pty(&self) -> &dyn tty::EventedPty<Reader = File, Writer = File> {
         self.pty.as_ref()
     }
 
@@ -76,17 +70,9 @@ impl Terminal {
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         debug!("Resizing terminal to {}x{}", cols, rows);
 
-        let size_info = SizeInfo::new(
-            cols as f32 * 8.0,
-            rows as f32 * 16.0,
-            8.0,
-            16.0,
-            0.0,
-            0.0,
-            false,
-        );
+        let size = TermSize::new(cols, rows);
         let mut term = self.term.lock();
-        term.resize(size_info);
+        term.resize(size);
 
         let window_size = alacritty_terminal::event::WindowSize {
             num_cols: cols as u16,
@@ -117,9 +103,7 @@ impl Terminal {
                 Ok(0) => break, // EOF
                 Ok(n) => {
                     let mut term = self.term.lock();
-                    for byte in &buf[..n] {
-                        self.processor.advance(&mut *term, *byte);
-                    }
+                    self.processor.advance(&mut *term, &buf[..n]);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => return Err(e.into()),
