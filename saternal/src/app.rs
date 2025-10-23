@@ -185,10 +185,9 @@ impl<'a> App<'a> {
                 } => {
                     // Only handle key presses, not releases
                     if event.state == ElementState::Pressed {
-                        let ctrl = modifiers_state.state().control_key();
                         let cmd = modifiers_state.state().super_key();  // Cmd on macOS
 
-                        // Handle Cmd+[key] hotkeys for font size adjustment
+                        // Handle Cmd+[key] hotkeys for font size adjustment (macOS-specific UI)
                         if cmd {
                             // Check both text and physical key to handle both Cmd+= and Cmd++
                             let key_text = match &event.logical_key {
@@ -256,42 +255,34 @@ impl<'a> App<'a> {
                                     _ => {}
                                 }
                             }
+                            // If we got here with Cmd pressed, don't send to terminal
+                            return;
                         }
 
-                        // Handle Ctrl+[key] control characters (Ctrl+C, Ctrl+D, etc.)
-                        if ctrl {
-                            if let PhysicalKey::Code(code) = event.physical_key {
-                                let control_char: Option<u8> = match code {
-                                    KeyCode::KeyC => Some(0x03),  // Ctrl+C → ETX (SIGINT)
-                                    KeyCode::KeyD => Some(0x04),  // Ctrl+D → EOT (EOF)
-                                    KeyCode::KeyZ => Some(0x1a),  // Ctrl+Z → SUB (SIGTSTP)
-                                    KeyCode::KeyL => Some(0x0c),  // Ctrl+L → FF (clear screen)
-                                    KeyCode::KeyU => Some(0x15),  // Ctrl+U → NAK (kill line)
-                                    KeyCode::KeyW => Some(0x17),  // Ctrl+W → ETB (delete word)
-                                    KeyCode::KeyA => Some(0x01),  // Ctrl+A → SOH (beginning of line)
-                                    KeyCode::KeyE => Some(0x05),  // Ctrl+E → ENQ (end of line)
-                                    KeyCode::KeyK => Some(0x0b),  // Ctrl+K → VT (kill to end)
-                                    KeyCode::KeyR => Some(0x12),  // Ctrl+R → DC2 (reverse search)
-                                    _ => None,
-                                };
+                        // Convert modifiers to our InputModifiers type
+                        let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
-                                if let Some(byte) = control_char {
-                                    debug!("Sending control character: 0x{:02x}", byte);
-                                    if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
-                                        let _ = active_tab.write_input(&[byte]);
-                                    }
-                                    return;  // Don't process as text
+                        // Try to convert key to terminal bytes using the input module
+                        if let PhysicalKey::Code(keycode) = event.physical_key {
+                            if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
+                                debug!("Sending key sequence: {:?}", bytes);
+                                if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                    let _ = active_tab.write_input(&bytes);
                                 }
+                                return;  // Processed by input module
                             }
                         }
-                    }
 
-                    // Handle regular text input
-                    if let Some(text) = &event.text {
-                        debug!("Received text: {}", text);
-                        // Send input to active terminal
-                        if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
-                            let _ = active_tab.write_input(text.as_bytes());
+                        // Handle regular text input (printable characters)
+                        // Only send if no special modifiers (Ctrl/Alt) were active
+                        if !input_mods.ctrl && !input_mods.alt {
+                            if let Some(text) = &event.text {
+                                debug!("Received text: {}", text);
+                                // Send input to active terminal
+                                if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                    let _ = active_tab.write_input(text.as_bytes());
+                                }
+                            }
                         }
                     }
                 }
