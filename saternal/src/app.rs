@@ -215,8 +215,12 @@ impl<'a> App<'a> {
                                 // Update config and save
                                 config.appearance.font_size = font_size;
                                 let _ = config.save(None);
-                                // TODO: Recreate renderer with new font size
-                                // For now, requires restart to take effect
+                                // Update renderer font size in real-time
+                                if let Some(mut renderer) = renderer.try_lock() {
+                                    if let Err(e) = renderer.set_font_size(font_size) {
+                                        log::error!("Failed to update font size: {}", e);
+                                    }
+                                }
                                 return;  // Don't process as text input
                             } else if let Some(key_text) = key_text {
                                 match key_text {
@@ -227,7 +231,12 @@ impl<'a> App<'a> {
                                         // Update config and save
                                         config.appearance.font_size = font_size;
                                         let _ = config.save(None);
-                                        // TODO: Recreate renderer with new font size
+                                        // Update renderer font size in real-time
+                                        if let Some(mut renderer) = renderer.try_lock() {
+                                            if let Err(e) = renderer.set_font_size(font_size) {
+                                                log::error!("Failed to update font size: {}", e);
+                                            }
+                                        }
                                         return;  // Don't process as text input
                                     }
                                     "0" => {
@@ -236,7 +245,12 @@ impl<'a> App<'a> {
                                         info!("Reset font size to default (14.0)");
                                         config.appearance.font_size = font_size;
                                         let _ = config.save(None);
-                                        // TODO: Recreate renderer with new font size
+                                        // Update renderer font size in real-time
+                                        if let Some(mut renderer) = renderer.try_lock() {
+                                            if let Err(e) = renderer.set_font_size(font_size) {
+                                                log::error!("Failed to update font size: {}", e);
+                                            }
+                                        }
                                         return;  // Don't process as text input
                                     }
                                     _ => {}

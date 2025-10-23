@@ -557,4 +557,50 @@ impl<'a> Renderer<'a> {
     pub fn font_manager(&mut self) -> &mut FontManager {
         &mut self.font_manager
     }
+
+    /// Update font size and recalculate cell dimensions
+    pub fn set_font_size(&mut self, font_size: f32) -> Result<()> {
+        // Update font manager
+        self.font_manager.set_font_size(font_size);
+        
+        // Recalculate cell dimensions
+        let (width, height) = self.font_manager.cell_dimensions();
+        self.cell_width = width as f32;
+        self.cell_height = height as f32;
+        
+        // Calculate baseline offset (approximate as 80% of height)
+        self.baseline_offset = self.cell_height * 0.8;
+        
+        // Recreate vertex buffer with new dimensions
+        self.recreate_vertex_buffer()?;
+        
+        Ok(())
+    }
+    
+    /// Recreate vertex buffer with current cell dimensions
+    fn recreate_vertex_buffer(&mut self) -> Result<()> {
+        // Define vertices for a single cell quad
+        let vertices = [
+            // Position (x, y, z), UV (u, v)
+            0.0, 0.0, 0.0, 0.0, 0.0,  // Top-left
+            self.cell_width, 0.0, 0.0, 1.0, 0.0,  // Top-right
+            0.0, self.cell_height, 0.0, 0.0, 1.0,  // Bottom-left
+            self.cell_width, self.cell_height, 0.0, 1.0, 1.0,  // Bottom-right
+        ];
+
+        self.vertex_buffer = self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: unsafe {
+                    std::slice::from_raw_parts(
+                        vertices.as_ptr() as *const u8,
+                        std::mem::size_of_val(&vertices),
+                    )
+                },
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        
+        Ok(())
+    }
 }
