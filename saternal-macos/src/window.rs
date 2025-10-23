@@ -24,7 +24,8 @@ impl DropdownWindow {
     }
 
     /// Configure a winit window to behave as a dropdown terminal
-    pub unsafe fn configure_window(&self, ns_window: id, height_percentage: f64) -> Result<()> {
+    /// ns_view is the winit NSView where wgpu will create the CAMetalLayer
+    pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<()> {
         // Get main screen dimensions
         let screen: id = msg_send![class!(NSScreen), mainScreen];
         let screen_frame: NSRect = msg_send![screen, frame];
@@ -68,6 +69,11 @@ impl DropdownWindow {
         let black_color: id = msg_send![class!(NSColor), blackColor];
         let () = msg_send![ns_window, setBackgroundColor:black_color];
 
+        // CRITICAL: Make the WINIT VIEW layer-backed BEFORE wgpu creates the surface
+        // wgpu will add the CAMetalLayer to THIS view, not the window's contentView!
+        let () = msg_send![ns_view, setWantsLayer:YES];
+        info!("Set winit NSView to layer-backed mode");
+
         info!("Configured dropdown window: {}x{} at ({}, {})",
               window_width, window_height, window_x, window_y);
 
@@ -76,8 +82,43 @@ impl DropdownWindow {
 
     /// Enable vibrancy after wgpu surface is created
     /// Call this AFTER the renderer is initialized
-    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id) -> Result<()> {
-        self.enable_vibrancy(ns_window)
+    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id) -> Result<()> {
+        // First, let's inspect and configure the Metal layer on the winit view
+        self.configure_metal_layer(ns_view)?;
+        // Don't add vibrancy yet - let's just get Metal rendering working first
+        // self.enable_vibrancy(ns_window)
+        Ok(())
+    }
+
+    /// Configure the CAMetalLayer to be visible and opaque
+    /// ns_view is the winit NSView where wgpu adds the CAMetalLayer
+    unsafe fn configure_metal_layer(&self, ns_view: id) -> Result<()> {
+        // Get the layer from the WINIT VIEW (not the window's contentView!)
+        let layer: id = msg_send![ns_view, layer];
+
+        if layer != nil {
+            info!("Found layer on winit NSView");
+
+            // Check if it's a CAMetalLayer
+            let layer_class: id = msg_send![layer, class];
+            // Get the class name properly - need to convert Class to NSString first
+            let class_name_nsstring: id = msg_send![layer_class, description];
+            let class_name: *const i8 = msg_send![class_name_nsstring, UTF8String];
+            let class_str = std::ffi::CStr::from_ptr(class_name).to_str().unwrap_or("unknown");
+            info!("Layer class: {}", class_str);
+
+            // Make sure layer is opaque
+            let () = msg_send![layer, setOpaque:YES];
+
+            // Ensure it's not hidden
+            let () = msg_send![layer, setHidden:NO];
+
+            info!("Layer configured: opaque=YES, hidden=NO");
+        } else {
+            info!("WARNING: No layer found on winit NSView! wgpu may not have created it yet.");
+        }
+
+        Ok(())
     }
 
     /// Enable vibrancy (background blur) effect

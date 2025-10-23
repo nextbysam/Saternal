@@ -23,6 +23,7 @@ pub struct Renderer<'a> {
     vertex_buffer: wgpu::Buffer,
     cell_width: f32,
     cell_height: f32,
+    baseline_offset: f32,
 }
 
 impl<'a> Renderer<'a> {
@@ -98,12 +99,14 @@ impl<'a> Renderer<'a> {
 
         let font_manager = FontManager::new(font_family, font_size)?;
 
-        // Calculate cell dimensions
-        let (cell_width, cell_height) = {
-            let metrics = font_manager.font().horizontal_line_metrics(font_size).unwrap();
+        // Calculate cell dimensions and baseline
+        let (cell_width, cell_height, baseline_offset) = {
+            let line_metrics = font_manager.font().horizontal_line_metrics(font_size).unwrap();
             let cell_width = font_manager.font().metrics('M', font_size).advance_width;
-            let cell_height = (metrics.ascent - metrics.descent + metrics.line_gap).ceil();
-            (cell_width, cell_height)
+            let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+            // Baseline is positioned from the top of the cell by the ascent value
+            let baseline_offset = line_metrics.ascent.ceil();
+            (cell_width, cell_height, baseline_offset)
         };
 
         // Create texture for text rendering using the SAME format as surface
@@ -283,6 +286,7 @@ impl<'a> Renderer<'a> {
             vertex_buffer,
             cell_width,
             cell_height,
+            baseline_offset,
         })
     }
 
@@ -322,11 +326,11 @@ impl<'a> Renderer<'a> {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            // TEMP: Use red to verify rendering works, then change back to transparent
-                            r: 1.0,
+                            // Black background for terminal
+                            r: 0.0,
                             g: 0.0,
                             b: 0.0,
-                            a: 1.0, // Opaque red for debugging
+                            a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -371,49 +375,10 @@ impl<'a> Renderer<'a> {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
 
-        // TEMP: Draw a test string "HELLO WORLD" manually to verify pipeline works
+        // Create buffer for rendering terminal text
         let mut buffer = vec![0u8; (width * height * 4) as usize];
 
-        let test_text = "HELLO WORLD";
-        for (i, ch) in test_text.chars().enumerate() {
-            let (metrics, bitmap) = self.font_manager.rasterize(ch);
-            let x = (i as f32 * self.cell_width) as usize;
-            let y = 50; //  50 pixels from top
-
-            for glyph_y in 0..metrics.height {
-                for glyph_x in 0..metrics.width {
-                    let px = x + glyph_x;
-                    let py = y + glyph_y + metrics.ymin.max(0) as usize;
-
-                    if px < width as usize && py < height as usize {
-                        let glyph_idx = glyph_y * metrics.width + glyph_x;
-                        let coverage = bitmap[glyph_idx];
-
-                        if coverage > 0 {
-                            let buffer_idx = (py * width as usize + px) * 4;
-                            // Use premultiplied alpha for PostMultiplied mode
-                            // Since we're using white (255,255,255), premultiplied means RGB = coverage
-                            if is_bgra {
-                                buffer[buffer_idx] = coverage;      // B (premultiplied)
-                                buffer[buffer_idx + 1] = coverage;  // G (premultiplied)
-                                buffer[buffer_idx + 2] = coverage;  // R (premultiplied) - white text
-                                buffer[buffer_idx + 3] = coverage; // A
-                            } else {
-                                buffer[buffer_idx] = coverage;      // R (premultiplied)
-                                buffer[buffer_idx + 1] = coverage;  // G (premultiplied)
-                                buffer[buffer_idx + 2] = coverage;  // B (premultiplied) - white text
-                                buffer[buffer_idx + 3] = coverage; // A
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        log::info!("Drew test string 'HELLO WORLD' at position (0, 50)");
-
-        /* DISABLED: Real terminal rendering until grid access issue is resolved
-        // Render each cell
+        // Render each cell from the terminal grid
         let mut char_count = 0;
         for row_idx in 0..rows {
             let line = Line(row_idx as i32);
@@ -421,15 +386,14 @@ impl<'a> Renderer<'a> {
                 let column = Column(col_idx);
                 let cell = &term.grid()[line][column];
 
-                total_cells += 1;
                 // Get character
                 let c = cell.c;
 
                 if c == '\0' {
-                    continue; // Skip null cells only, render spaces as background
+                    continue; // Skip null cells
                 }
 
-                // Skip spaces for now to only render visible text
+                // Skip spaces (only render visible text)
                 if c == ' ' {
                     continue;
                 }
@@ -441,42 +405,55 @@ impl<'a> Renderer<'a> {
                 // Rasterize glyph
                 let (metrics, bitmap) = self.font_manager.rasterize(c);
 
-                // Calculate position in window coordinates
-                let x = col_idx as f32 * self.cell_width;
-                let y = row_idx as f32 * self.cell_height;
-                
+                // Calculate cell position in window coordinates
+                let cell_x = col_idx as f32 * self.cell_width;
+                let cell_y = row_idx as f32 * self.cell_height;
+
+                // Calculate baseline position (from top of cell)
+                let baseline_y = cell_y + self.baseline_offset;
+
+                // Calculate glyph position using proper baseline alignment
+                // In fontdue, ymin is the offset from baseline to top of glyph (negative means above baseline)
+                // So glyph top Y = baseline - (height + ymin)
+                let glyph_x = cell_x;
+                let glyph_y = baseline_y - (metrics.height as f32 + metrics.ymin as f32);
+
                 if row_idx == 0 && col_idx < 5 {
-                    log::debug!("Char '{}' at ({}, {}) with color ({},{},{})", c, x, y, fg_r, fg_g, fg_b);
+                    log::debug!("Char '{}' at cell ({}, {}) -> glyph ({:.1}, {:.1}), baseline {:.1}, metrics: h={} ymin={}",
+                               c, cell_x, cell_y, glyph_x, glyph_y, baseline_y, metrics.height, metrics.ymin);
                 }
 
-                // Draw glyph to buffer
-                for glyph_y in 0..metrics.height {
-                    for glyph_x in 0..metrics.width {
-                        let px = x as usize + glyph_x;
-                        let py = y as usize + glyph_y + metrics.ymin.max(0) as usize;
+                // Draw glyph to buffer with premultiplied alpha
+                for gy in 0..metrics.height {
+                    for gx in 0..metrics.width {
+                        let px = (glyph_x as i32 + gx as i32);
+                        let py = (glyph_y as i32 + gy as i32);
 
-                        if px < width as usize && py < height as usize {
-                            let glyph_idx = glyph_y * metrics.width + glyph_x;
+                        // Bounds check
+                        if px >= 0 && py >= 0 && px < width as i32 && py < height as i32 {
+                            let glyph_idx = gy * metrics.width + gx;
                             let coverage = bitmap[glyph_idx];
 
                             if coverage > 0 {
-                                let buffer_idx = (py * width as usize + px) * 4;
+                                let buffer_idx = ((py as usize * width as usize) + px as usize) * 4;
+
+                                // Premultiply the color channels by alpha for correct blending
+                                let alpha = coverage as f32 / 255.0;
+                                let fg_r_pre = (fg_r as f32 * alpha) as u8;
+                                let fg_g_pre = (fg_g as f32 * alpha) as u8;
+                                let fg_b_pre = (fg_b as f32 * alpha) as u8;
 
                                 // Write in correct channel order (BGRA or RGBA)
                                 if is_bgra {
-                                    buffer[buffer_idx] = fg_b;     // B
-                                    buffer[buffer_idx + 1] = fg_g; // G
-                                    buffer[buffer_idx + 2] = fg_r; // R
+                                    buffer[buffer_idx] = fg_b_pre;     // B (premultiplied)
+                                    buffer[buffer_idx + 1] = fg_g_pre; // G (premultiplied)
+                                    buffer[buffer_idx + 2] = fg_r_pre; // R (premultiplied)
                                     buffer[buffer_idx + 3] = coverage; // A
                                 } else {
-                                    buffer[buffer_idx] = fg_r;     // R
-                                    buffer[buffer_idx + 1] = fg_g; // G
-                                    buffer[buffer_idx + 2] = fg_b; // B
+                                    buffer[buffer_idx] = fg_r_pre;     // R (premultiplied)
+                                    buffer[buffer_idx + 1] = fg_g_pre; // G (premultiplied)
+                                    buffer[buffer_idx + 2] = fg_b_pre; // B (premultiplied)
                                     buffer[buffer_idx + 3] = coverage; // A
-                                }
-
-                                if row_idx == 0 && col_idx == 0 && glyph_x < 3 && glyph_y < 3 {
-                                    log::trace!("Writing pixel at ({},{}) = RGBA({},{},{},{})", px, py, fg_r, fg_g, fg_b, coverage);
                                 }
                             }
                         }
@@ -485,8 +462,7 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        log::info!("Rendered {} non-empty characters", char_count);
-        */
+        log::info!("Rendered {} non-empty characters from terminal grid", char_count);
 
         // Upload to GPU texture
         log::debug!("Uploading {}x{} texture to GPU", width, height);

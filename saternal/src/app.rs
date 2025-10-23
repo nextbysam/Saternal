@@ -57,7 +57,7 @@ impl<'a> App<'a> {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
                     let ns_window: id = msg_send![ns_view, window];
-                    dropdown.configure_window(ns_window, config.window.height_percentage)?;
+                    dropdown.configure_window(ns_window, ns_view, config.window.height_percentage)?;
                 }
             }
         }
@@ -107,15 +107,14 @@ impl<'a> App<'a> {
         .await?;
         let renderer = Arc::new(Mutex::new(renderer));
 
-        // IMPORTANT: Add vibrancy layer AFTER wgpu creates its Metal layer
-        // This ensures the vibrancy is behind the Metal rendering surface
-        info!("Adding vibrancy layer behind Metal surface");
+        // IMPORTANT: Configure Metal layer AFTER wgpu creates it
+        info!("Configuring Metal layer for rendering");
         unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
                     let ns_window: id = msg_send![ns_view, window];
-                    dropdown.lock().enable_vibrancy_layer(ns_window)?;
+                    dropdown.lock().enable_vibrancy_layer(ns_window, ns_view)?;
                 }
             }
         }
