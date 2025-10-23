@@ -193,9 +193,12 @@ The `saternal` binary (main application) has some remaining errors that need att
 ## 🎯 Next Steps
 
 ### Immediate (to get it compiling)
-1. Fix alacritty_terminal API compatibility
-2. Resolve type errors with PTY and terminal initialization
-3. Get a clean cargo build
+1. ✅ ~~Fix alacritty_terminal API compatibility~~ - DONE!
+2. ✅ ~~Resolve type errors with PTY and terminal initialization~~ - DONE!
+3. **Fix main binary (saternal) compilation errors** - IN PROGRESS
+   - Fix app.rs imports and type issues
+   - Fix tab.rs mutability issues
+4. Get a clean cargo build for entire workspace
 
 ### Short-term (basic functionality)
 1. Complete basic terminal rendering (show text)

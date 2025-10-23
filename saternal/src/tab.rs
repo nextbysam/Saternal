@@ -1,6 +1,6 @@
 use anyhow::Result;
 use log::info;
-use saternal_core::{Pane, PaneNode, SplitDirection};
+use saternal_core::{PaneNode, SplitDirection};
 
 /// Represents a single tab containing a pane tree
 pub struct Tab {
@@ -73,7 +73,7 @@ impl TabManager {
         info!("Creating tab manager");
 
         // Start with one tab
-        let tab = Tab::new(0, Some(shell.clone()))?;
+        let mut tab = Tab::new(0, Some(shell.clone()))?;
 
         // Set first pane as focused
         tab.pane_tree.set_focus(0);
@@ -91,7 +91,7 @@ impl TabManager {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
 
-        let tab = Tab::new(id, Some(self.shell.clone()))?;
+        let mut tab = Tab::new(id, Some(self.shell.clone()))?;
         tab.pane_tree.set_focus(0);
 
         self.tabs.push(tab);

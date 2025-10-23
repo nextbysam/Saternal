@@ -2,13 +2,13 @@ use crate::tab::TabManager;
 use anyhow::Result;
 use log::{debug, info};
 use parking_lot::Mutex;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use saternal_core::{Config, Renderer};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    platform::macos::WindowExtMacOS,
     window::WindowBuilder,
 };
 
@@ -29,7 +29,7 @@ impl<'a> App<'a> {
         info!("Initializing application");
 
         // Create event loop
-        let event_loop = EventLoop::new();
+        let event_loop = EventLoop::new()?;
 
         // Create window
         let window = WindowBuilder::new()
@@ -44,8 +44,12 @@ impl<'a> App<'a> {
         // Configure dropdown window behavior
         let dropdown = DropdownWindow::new();
         unsafe {
-            let ns_window = window.ns_window() as cocoa::base::id;
-            dropdown.configure_window(ns_window, config.window.height_percentage)?;
+            if let Ok(handle) = window.window_handle() {
+                if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
+                    let ns_window = appkit_handle.ns_window.as_ptr() as cocoa::base::id;
+                    dropdown.configure_window(ns_window, config.window.height_percentage)?;
+                }
+            }
         }
         let dropdown = Arc::new(Mutex::new(dropdown));
 
@@ -69,8 +73,12 @@ impl<'a> App<'a> {
             info!("Hotkey triggered!");
             let dropdown = dropdown_clone.lock();
             unsafe {
-                let ns_window = window_clone.ns_window() as cocoa::base::id;
-                let _ = dropdown.toggle(ns_window);
+                if let Ok(handle) = window_clone.window_handle() {
+                    if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
+                        let ns_window = appkit_handle.ns_window.as_ptr() as cocoa::base::id;
+                        let _ = dropdown.toggle(ns_window);
+                    }
+                }
             }
         })?;
         let hotkey_manager = Arc::new(hotkey_manager);
@@ -99,8 +107,8 @@ impl<'a> App<'a> {
 
         info!("Starting event loop");
 
-        event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+        event_loop.run(move |event, elwt| {
+            elwt.set_control_flow(ControlFlow::Poll);
 
             // Process hotkey events
             hotkey_manager.process_events();
@@ -111,7 +119,7 @@ impl<'a> App<'a> {
                     ..
                 } => {
                     info!("Close requested");
-                    *control_flow = ControlFlow::Exit;
+                    elwt.exit();
                 }
 
                 Event::WindowEvent {
@@ -124,29 +132,23 @@ impl<'a> App<'a> {
                 }
 
                 Event::WindowEvent {
-                    event: WindowEvent::ReceivedCharacter(ch),
+                    event: WindowEvent::KeyboardInput { event, .. },
                     ..
-                } => {
-                    debug!("Received character: {}", ch);
-                    // Send input to active terminal
-                    if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
-                        let input = ch.to_string();
-                        let _ = active_tab.write_input(input.as_bytes());
+                } if event.text.is_some() => {
+                    if let Some(text) = &event.text {
+                        debug!("Received text: {}", text);
+                        // Send input to active terminal
+                        if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                            let _ = active_tab.write_input(text.as_bytes());
+                        }
                     }
                 }
 
-                Event::WindowEvent {
-                    event: WindowEvent::KeyboardInput { input, .. },
-                    ..
-                } => {
-                    debug!("Keyboard input: {:?}", input);
-                    // Handle keyboard shortcuts here
-                    // TODO: Implement tab switching, pane navigation, etc.
-                }
 
-                Event::MainEventsCleared => {
+
+                Event::AboutToWait => {
                     // Process terminal output
-                    if let Ok(mut tab_mgr) = tab_manager.try_lock() {
+                    if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
                             let _ = active_tab.process_output();
                         }
@@ -156,9 +158,12 @@ impl<'a> App<'a> {
                     window.request_redraw();
                 }
 
-                Event::RedrawRequested(_) => {
+                Event::WindowEvent {
+                    event: WindowEvent::RedrawRequested,
+                    ..
+                } => {
                     // Render the frame
-                    if let Ok(mut renderer) = renderer.try_lock() {
+                    if let Some(mut renderer) = renderer.try_lock() {
                         if let Err(e) = renderer.render() {
                             log::error!("Render error: {}", e);
                         }
@@ -167,6 +172,8 @@ impl<'a> App<'a> {
 
                 _ => {}
             }
-        });
+        })?;
+
+        Ok(())
     }
 }

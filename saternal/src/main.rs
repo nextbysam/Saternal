@@ -3,7 +3,6 @@ mod tab;
 
 use anyhow::Result;
 use log::info;
-use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
