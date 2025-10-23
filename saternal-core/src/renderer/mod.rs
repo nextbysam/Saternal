@@ -120,6 +120,12 @@ impl<'a> Renderer<'a> {
             log::warn!("No terminal provided to render");
         }
 
+        self.execute_render_pass()?;
+        Ok(())
+    }
+
+    /// Execute the GPU render pass to draw the frame
+    fn execute_render_pass(&mut self) -> Result<()> {
         log::trace!("Getting surface texture for rendering...");
         let frame = self.surface.get_current_texture()?;
         log::trace!("Got surface texture, creating view...");
@@ -154,7 +160,6 @@ impl<'a> Renderer<'a> {
                 occlusion_query_set: None,
             });
 
-            // Render the fullscreen quad with terminal texture
             log::trace!("Setting pipeline and drawing quad...");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
@@ -164,7 +169,6 @@ impl<'a> Renderer<'a> {
         }
         
         log::trace!("Submitting command buffer and presenting frame...");
-
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 

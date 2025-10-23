@@ -4,7 +4,7 @@ use cocoa::base::id;
 use log::{debug, info};
 use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
-use saternal_core::{Config, Renderer};
+use saternal_core::{Config, Renderer, key_to_bytes, InputModifiers};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
