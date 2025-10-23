@@ -186,9 +186,18 @@ impl<'a> App<'a> {
                     event: WindowEvent::RedrawRequested,
                     ..
                 } => {
-                    // Render the frame
+                    // Render the frame with terminal content
                     if let Some(mut renderer) = renderer.try_lock() {
-                        if let Err(e) = renderer.render() {
+                        // Get the active terminal for rendering
+                        let term = if let Some(tab_mgr) = tab_manager.try_lock() {
+                            tab_mgr.active_tab()
+                                .and_then(|tab| tab.pane_tree.focused_pane())
+                                .map(|pane| pane.terminal.term())
+                        } else {
+                            None
+                        };
+                        
+                        if let Err(e) = renderer.render(term) {
                             log::error!("Render error: {}", e);
                         }
                     }

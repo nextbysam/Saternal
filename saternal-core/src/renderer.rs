@@ -1,6 +1,10 @@
 use crate::font::FontManager;
+use alacritty_terminal::term::Term;
+use alacritty_terminal::grid::Dimensions;
 use anyhow::Result;
 use log::info;
+use parking_lot::Mutex;
+use std::sync::Arc;
 use wgpu;
 
 /// GPU-accelerated renderer using wgpu/Metal
@@ -26,7 +30,7 @@ impl<'a> Renderer<'a> {
             ..Default::default()
         });
 
-        let surface = unsafe { instance.create_surface(window) }?;
+        let surface = instance.create_surface(window)?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -75,8 +79,8 @@ impl<'a> Renderer<'a> {
         })
     }
 
-    /// Render a frame
-    pub fn render(&mut self) -> Result<()> {
+    /// Render a frame with terminal content
+    pub fn render<T>(&mut self, term: Option<Arc<Mutex<Term<T>>>>) -> Result<()> {
         let frame = self.surface.get_current_texture()?;
         let view = frame
             .texture
@@ -109,7 +113,29 @@ impl<'a> Renderer<'a> {
                 occlusion_query_set: None,
             });
 
-            // TODO: Render terminal grid and glyphs here
+            // TODO: Implement actual glyph rendering with wgpu
+            // For now, just clear the background
+            // In a complete implementation:
+            // 1. Iterate through terminal grid cells
+            // 2. Rasterize glyphs using font_manager
+            // 3. Upload glyph textures to GPU
+            // 4. Render quads with text textures
+            
+            if let Some(term_arc) = term {
+                if let Some(term_lock) = term_arc.try_lock() {
+                    // Access the terminal grid
+                    let _rows = term_lock.screen_lines();
+                    let _cols = term_lock.columns();
+                    
+                    // TODO: Iterate through grid and render each cell
+                    // let grid = &term_lock.grid();
+                    // for row in grid.display_iter() {
+                    //     for cell in row {
+                    //         // Render cell character at position
+                    //     }
+                    // }
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

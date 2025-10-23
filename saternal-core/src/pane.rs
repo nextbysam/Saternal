@@ -83,7 +83,18 @@ impl PaneNode {
         Ok(())
     }
 
-    /// Get the focused pane, if any
+    /// Get the focused pane (immutable), if any
+    pub fn focused_pane(&self) -> Option<&Pane> {
+        match self {
+            PaneNode::Leaf { pane } if pane.focused => Some(pane),
+            PaneNode::Leaf { .. } => None,
+            PaneNode::Split { children, .. } => children
+                .iter()
+                .find_map(|child| child.focused_pane()),
+        }
+    }
+
+    /// Get the focused pane (mutable), if any
     pub fn focused_pane_mut(&mut self) -> Option<&mut Pane> {
         match self {
             PaneNode::Leaf { pane } if pane.focused => Some(pane),

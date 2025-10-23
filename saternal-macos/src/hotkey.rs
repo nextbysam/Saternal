@@ -1,6 +1,6 @@
 use anyhow::Result;
 use global_hotkey::{
-    hotkey::{Code, HotKey, Modifiers},
+    hotkey::{Code, HotKey, HotKeyState, Modifiers},
     GlobalHotKeyEvent, GlobalHotKeyManager,
 };
 use log::info;
@@ -16,7 +16,7 @@ pub struct HotkeyManager {
 }
 
 impl HotkeyManager {
-    /// Create a new hotkey manager with Cmd+` (backtick)
+    /// Create a new hotkey manager with Cmd+` (backtick) - standard terminal toggle
     pub fn new<F>(callback: F) -> Result<Self>
     where
         F: FnMut() + Send + 'static,
@@ -27,6 +27,7 @@ impl HotkeyManager {
             .map_err(|e| anyhow::anyhow!("Failed to create hotkey manager: {}", e))?;
 
         // Cmd+` on macOS (META modifier is Cmd key)
+        // This is the standard hotkey for dropdown terminals
         let hotkey = HotKey::new(Some(Modifiers::META), Code::Backquote);
 
         manager
@@ -44,10 +45,14 @@ impl HotkeyManager {
 
     /// Process hotkey events (call this in your event loop)
     pub fn process_events(&self) {
-        if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
+        // Process ALL pending events to avoid queue buildup
+        while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
             if event.id == self.hotkey.id() {
-                let mut callback = self.callback.lock();
-                callback();
+                // Only trigger on key DOWN events to avoid repeated triggers
+                if event.state == global_hotkey::hotkey::HotKeyState::Pressed {
+                    let mut callback = self.callback.lock();
+                    callback();
+                }
             }
         }
     }
