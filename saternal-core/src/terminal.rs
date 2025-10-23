@@ -1,7 +1,7 @@
 use alacritty_terminal::{
     event::EventListener,
     grid::Dimensions,
-    term::{Config as TermConfig, Term, TermSize},
+    term::{Config as TermConfig, SizeInfo, Term},
     tty,
     vte::ansi::Processor,
 };
@@ -26,7 +26,6 @@ impl Terminal {
         let pty_config = tty::Options {
             shell: shell.map(|s| tty::Shell::new(s, vec![])),
             working_directory: None,
-            hold: false,
         };
 
         let window_size = alacritty_terminal::event::WindowSize {
@@ -38,10 +37,18 @@ impl Terminal {
 
         let pty = tty::new(&pty_config, window_size, 0)?;
 
-        // Create terminal with TermSize
+        // Create terminal with SizeInfo
         let event_listener = TermEventListener::new();
-        let term_size = TermSize::new(cols, rows);
-        let term = Term::new(TermConfig::default(), &term_size, event_listener);
+        let size_info = SizeInfo::new(
+            cols as f32 * 8.0,   // width in pixels
+            rows as f32 * 16.0,  // height in pixels
+            8.0,                  // cell width
+            16.0,                 // cell height
+            0.0,                  // padding x
+            0.0,                  // padding y
+            false,                // dynamic title
+        );
+        let term = Term::new(TermConfig::default(), &size_info, event_listener);
 
         let term = Arc::new(Mutex::new(term));
 
@@ -69,9 +76,17 @@ impl Terminal {
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         debug!("Resizing terminal to {}x{}", cols, rows);
 
-        let term_size = TermSize::new(cols, rows);
+        let size_info = SizeInfo::new(
+            cols as f32 * 8.0,
+            rows as f32 * 16.0,
+            8.0,
+            16.0,
+            0.0,
+            0.0,
+            false,
+        );
         let mut term = self.term.lock();
-        term.resize(term_size);
+        term.resize(size_info);
 
         let window_size = alacritty_terminal::event::WindowSize {
             num_cols: cols as u16,
