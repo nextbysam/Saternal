@@ -131,18 +131,21 @@ impl CursorState {
         let should_hide = scroll_offset > 0 || hide_cursor;
         
         // Calculate pixel position
+        // BUGFIX: cursor_pos.line appears to be 0-indexed from top,
+        // but there's an off-by-one where cursor renders 1 line above text
+        // Adding 1 to correct the alignment
         let pixel_x = cursor_pos.column.0 as f32 * cell_width;
-        let pixel_y = cursor_pos.line.0 as f32 * cell_height;
+        let pixel_y = (cursor_pos.line.0 + scroll_offset as i32 + 1) as f32 * cell_height;
 
         // Convert to normalized device coordinates (-1 to 1)
         let ndc_x = (pixel_x / window_width as f32) * 2.0 - 1.0;
         let ndc_y = -((pixel_y / window_height as f32) * 2.0 - 1.0); // Flip Y
 
-        // Calculate NDC size based on style
+        // Calculate NDC size based on style (thinner cursor)
         let (width, height) = match self.config.style {
             CursorStyle::Block => (cell_width, cell_height),
-            CursorStyle::Beam => (2.0, cell_height),
-            CursorStyle::Underline => (cell_width, 2.0),
+            CursorStyle::Beam => (1.5, cell_height),  // Thinner beam
+            CursorStyle::Underline => (cell_width, 1.5),  // Thinner underline
         };
 
         let ndc_width = (width / window_width as f32) * 2.0;
