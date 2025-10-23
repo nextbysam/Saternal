@@ -9,6 +9,16 @@ license.workspace = true
 name = "saternal"
 path = "src/main.rs"
 
+[package.metadata.bundle]
+name = "Saternal"
+identifier = "com.saternal.terminal"
+version = "0.1.0"
+copyright = "Copyright (c) 2024 Saternal Contributors"
+category = "Developer Tool"
+short_description = "A blazing-fast dropdown terminal emulator for macOS"
+icon = ["resources/macos/AppIcon.icns"]
+osx_minimum_system_version = "11.0"
+
 [dependencies]
 saternal-core = { path = "../saternal-core" }
 saternal-macos = { path = "../saternal-macos" }

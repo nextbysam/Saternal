@@ -1127,7 +1127,94 @@ After the fix, cursor positioning should be correct:
 
 ---
 
-**Document Status:** Implementation Complete (visibility + positioning + NDC direction fixes)
+---
+
+## Issue #6: Cursor Hidden in TUI Apps (Claude CLI) (FIXED - 2025-10-23)
+
+### Problem Description
+
+When running TUI applications like Claude CLI, the cursor doesn't appear at the text input position. The shell cursor works perfectly, but Claude CLI explicitly hides the cursor at its text input area (line 10).
+
+### Root Cause Analysis
+
+From debug logs (`/tmp/saternal_debug.log`):
+
+```
+[2025-10-23T23:22:28Z DEBUG] Cursor: pos=(0, 10), SHOW_CURSOR=false, hide=true
+Cursor state: pixel=(0.0, 380.0), ndc=(-1.000, 0.472), size=(0.011, -0.053), visible=0
+```
+
+**Key findings:**
+- Claude CLI positions cursor at line 10 (text input area)  
+- Sends DECTCEM hide command (`CSI ? 25 l`)
+- All 661 frames at line 10 had `SHOW_CURSOR=false`
+- Claude CLI never sends show cursor at that position
+
+**Why this happens:**
+Many TUI applications manage their own cursor rendering:
+1. Hide terminal cursor during UI rendering
+2. Draw custom cursor visualization
+3. May not always re-enable terminal cursor
+
+### The Fix
+
+Added a `force_show` configuration option that overrides application hide requests.
+
+**Location:** `saternal-core/src/renderer/cursor/config.rs`
+
+```rust
+pub struct CursorConfig {
+    pub style: CursorStyle,
+    pub blink: bool,
+    pub blink_interval_ms: u64,
+    pub color: [f32; 4],
+    pub force_show: bool,  // NEW: Override app hide requests
+}
+```
+
+**Location:** `saternal-core/src/renderer/cursor/state.rs:131-132`
+
+```rust
+// Hide cursor if scrolled or terminal mode requests it
+// Unless force_show is enabled (overrides application hide requests)
+let should_hide = scroll_offset > 0 || (hide_cursor && !self.config.force_show);
+```
+
+### Configuration
+
+Add to `~/.config/saternal/config.toml`:
+
+```toml
+[appearance.cursor]
+style = "block"
+blink = true
+blink_interval_ms = 530
+color = [1.0, 1.0, 1.0, 0.8]
+force_show = true  # Show cursor even when apps request to hide it
+```
+
+**When to enable `force_show`:**
+- ✅ TUI apps that don't show their own cursor (Claude CLI, some custom tools)
+- ✅ Debugging terminal applications
+- ✅ Accessibility - always know where input goes
+
+**When to keep `force_show = false` (default):**
+- ✅ Apps that draw custom cursors (vim, nano)
+- ✅ Full-screen apps that manage cursor (htop, less)
+- ✅ Standard terminal behavior compatibility
+
+### Verification
+
+Test with `force_show = true`:
+- [x] Shell cursor still works normally
+- [ ] Claude CLI shows cursor at text input
+- [ ] Cursor respects scroll hiding (still hides when scrolled)
+- [ ] Cursor blinks at configured rate
+- [ ] Other TUI apps work correctly (vim, htop, nano)
+
+---
+
+**Document Status:** Implementation Complete (visibility + positioning + NDC + force_show)
 **Last Updated:** 2025-10-23
 **Author:** Claude (AI Assistant)
 **For:** Saternal Terminal Emulator Project
