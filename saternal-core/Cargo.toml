@@ -1,0 +1,30 @@
+[package]
+name = "saternal-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Terminal emulation
+alacritty_terminal.workspace = true
+vte.workspace = true
+
+# Font rendering
+fontdue.workspace = true
+swash.workspace = true
+
+# GPU rendering
+wgpu.workspace = true
+
+# Async
+tokio.workspace = true
+futures.workspace = true
+
+# Utilities
+log.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+bitflags.workspace = true
+serde.workspace = true

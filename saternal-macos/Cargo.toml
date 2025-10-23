@@ -1,0 +1,22 @@
+[package]
+name = "saternal-macos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# macOS platform APIs
+cocoa.workspace = true
+objc.workspace = true
+core-foundation.workspace = true
+core-graphics.workspace = true
+
+# Global hotkey
+global-hotkey.workspace = true
+
+# Utilities
+log.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
