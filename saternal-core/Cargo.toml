@@ -16,6 +16,7 @@ swash.workspace = true
 
 # GPU rendering
 wgpu.workspace = true
+winit.workspace = true
 
 # Async
 tokio.workspace = true
@@ -28,3 +29,4 @@ thiserror.workspace = true
 parking_lot.workspace = true
 bitflags.workspace = true
 serde.workspace = true
+toml.workspace = true

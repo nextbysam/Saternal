@@ -4,18 +4,18 @@ use log::info;
 use wgpu;
 
 /// GPU-accelerated renderer using wgpu/Metal
-pub struct Renderer {
+pub struct Renderer<'a> {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface: wgpu::Surface,
+    surface: wgpu::Surface<'a>,
     config: wgpu::SurfaceConfiguration,
     font_manager: FontManager,
 }
 
-impl Renderer {
+impl<'a> Renderer<'a> {
     /// Create a new renderer
     pub async fn new(
-        window: &winit::window::Window,
+        window: &'a winit::window::Window,
         font_family: &str,
         font_size: f32,
     ) -> Result<Self> {

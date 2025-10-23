@@ -1,13 +1,12 @@
 use alacritty_terminal::{
     event::EventListener,
-    event_loop::{EventLoop, Msg, Notifier},
+    event_loop::Notifier,
     grid::Dimensions,
     term::Term,
-    tty::{self, Pty},
-    vte::ansi,
+    tty,
 };
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{debug, info};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
