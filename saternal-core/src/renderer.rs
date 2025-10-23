@@ -8,6 +8,7 @@ use log::info;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use wgpu;
+use wgpu::util::DeviceExt;
 
 /// GPU-accelerated renderer using wgpu/Metal
 pub struct Renderer<'a> {
@@ -176,7 +177,7 @@ impl<'a> Renderer<'a> {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 20, // 2 floats (pos) + 2 floats (tex) + 4 bytes (color) = 20 bytes
+                    array_stride: 16, // 2 floats (pos) + 2 floats (tex) = 16 bytes
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
@@ -219,13 +220,37 @@ impl<'a> Renderer<'a> {
             multiview: None,
         });
 
-        // Create vertex buffer (will be updated per frame)
-        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        // Create vertex buffer with fullscreen quad vertices
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct Vertex {
+            position: [f32; 2],
+            tex_coords: [f32; 2],
+        }
+
+        let vertices = [
+            // Top-left triangle
+            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex { position: [-1.0, -1.0], tex_coords: [0.0, 1.0] },
+            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
+            // Bottom-right triangle
+            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },
+            Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] },
+        ];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
-            size: (6 * 20 * 5000) as u64, // 5000 characters max
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            contents: unsafe {
+                std::slice::from_raw_parts(
+                    vertices.as_ptr() as *const u8,
+                    std::mem::size_of_val(&vertices),
+                )
+            },
+            usage: wgpu::BufferUsages::VERTEX,
         });
+
+        info!("Created fullscreen quad vertex buffer with 6 vertices");
 
         Ok(Self {
             device,
