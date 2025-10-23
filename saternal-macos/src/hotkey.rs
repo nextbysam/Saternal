@@ -11,7 +11,8 @@ use std::sync::Arc;
 pub struct HotkeyManager {
     manager: GlobalHotKeyManager,
     hotkey: HotKey,
-    callback: Arc<Mutex<Box<dyn FnMut() + Send + 'static>>>,
+    callback: Arc<Mutex<Box<dyn FnMut() + Send + 'static>>>, 
+    
 }
 
 impl HotkeyManager {
