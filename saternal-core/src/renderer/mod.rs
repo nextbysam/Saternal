@@ -89,11 +89,17 @@ impl<'a> Renderer<'a> {
 
     /// Scroll viewport by delta lines
     /// Positive delta = scroll up (into history), Negative delta = scroll down (toward present)
+    /// 
+    /// Note: The actual bounds checking happens in render_to_buffer() where we have access
+    /// to the terminal's history_size(). This allows us to clamp to the available scrollback.
+    /// Using saturating arithmetic here prevents overflow but the real limit is enforced at render time.
     pub fn scroll(&mut self, delta: i32) {
         if delta > 0 {
+            // Scroll up into history
             self.scroll_offset = self.scroll_offset.saturating_add(delta as usize);
             log::debug!("Scrolled up, offset now: {}", self.scroll_offset);
-        } else {
+        } else if delta < 0 {
+            // Scroll down toward present (offset 0 = live view)
             self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as usize);
             log::debug!("Scrolled down, offset now: {}", self.scroll_offset);
         }

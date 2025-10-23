@@ -45,8 +45,13 @@ impl TextRasterizer {
         let cols = term.columns();
         let cursor = term.grid().cursor.point;
         
-        log::info!("Rendering terminal: {}x{} cells, cursor at ({}, {})",
-                   cols, rows, cursor.column.0, cursor.line.0);
+        // CRITICAL: Clamp scroll_offset to available history to prevent out-of-bounds access
+        // The grid can access lines from -history_size to screen_lines-1
+        let history_size = term.grid().history_size();
+        let scroll_offset = scroll_offset.min(history_size);
+        
+        log::info!("Rendering terminal: {}x{} cells, cursor at ({}, {}), scroll_offset={}, history_size={}",
+                   cols, rows, cursor.column.0, cursor.line.0, scroll_offset, history_size);
 
         // Determine if we need BGRA or RGBA based on surface format
         let is_bgra = matches!(
