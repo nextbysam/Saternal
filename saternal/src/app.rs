@@ -119,7 +119,7 @@ impl<'a> App<'a> {
     }
 
     /// Run the application event loop
-    pub async fn run(self) -> Result<()> {
+    pub fn run(self) -> Result<()> {
         let Self {
             event_loop,
             window,

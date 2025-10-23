@@ -4,8 +4,7 @@ mod tab;
 use anyhow::Result;
 use log::info;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -16,9 +15,9 @@ async fn main() -> Result<()> {
     let config = saternal_core::Config::load(None)?;
     info!("Loaded configuration: {:?}", config);
 
-    // Create and run the application
-    let app = app::App::new(config).await?;
-    app.run().await?;
+    // Create and run the application using pollster to block on async initialization
+    let app = pollster::block_on(app::App::new(config))?;
+    app.run()?;
 
     Ok(())
 }
