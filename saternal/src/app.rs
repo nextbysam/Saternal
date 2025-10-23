@@ -8,9 +8,9 @@ use saternal_core::{Config, Renderer};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
-    event::{Event, WindowEvent, ElementState},
+    event::{Event, WindowEvent, ElementState, Modifiers},
     event_loop::{ControlFlow, EventLoop},
-    keyboard::{PhysicalKey, KeyCode},
+    keyboard::{PhysicalKey, KeyCode, Key},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::WindowBuilder,
 };
@@ -144,6 +144,7 @@ impl<'a> App<'a> {
         let hotkey_manager = self.hotkey_manager.clone();
         let mut font_size = self.font_size;
         let mut config = self.config.clone();
+        let mut modifiers_state = Modifiers::default();  // Track modifier keys state
 
         info!("Starting event loop");
 
@@ -163,6 +164,13 @@ impl<'a> App<'a> {
                 }
 
                 Event::WindowEvent {
+                    event: WindowEvent::ModifiersChanged(new_modifiers),
+                    ..
+                } => {
+                    modifiers_state = new_modifiers;
+                }
+
+                Event::WindowEvent {
                     event: WindowEvent::Resized(size),
                     ..
                 } => {
@@ -177,14 +185,17 @@ impl<'a> App<'a> {
                 } => {
                     // Only handle key presses, not releases
                     if event.state == ElementState::Pressed {
-                        let modifiers = event.modifiers.state();
-                        let ctrl = modifiers.control_key();
-                        let cmd = modifiers.super_key();  // Cmd on macOS
+                        let ctrl = modifiers_state.state().control_key();
+                        let cmd = modifiers_state.state().super_key();  // Cmd on macOS
 
                         // Handle Cmd+[key] hotkeys for font size adjustment
-                        if cmd && event.logical_key.to_text().is_some() {
-                            let key_text = event.logical_key.to_text().unwrap();
-                            match key_text {
+                        if cmd {
+                            let key_text = match &event.logical_key {
+                                Key::Character(s) => Some(s.as_str()),
+                                _ => None,
+                            };
+                            if let Some(key_text) = key_text {
+                                match key_text {
                                 "=" | "+" => {
                                     // Increase font size
                                     font_size = (font_size + 2.0).min(48.0);
@@ -213,6 +224,7 @@ impl<'a> App<'a> {
                                     // TODO: Recreate renderer with new font size
                                 }
                                 _ => {}
+                                }
                             }
                         }
 
