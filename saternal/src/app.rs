@@ -190,40 +190,56 @@ impl<'a> App<'a> {
 
                         // Handle Cmd+[key] hotkeys for font size adjustment
                         if cmd {
+                            // Check both text and physical key to handle both Cmd+= and Cmd++
                             let key_text = match &event.logical_key {
                                 Key::Character(s) => Some(s.as_str()),
                                 _ => None,
                             };
-                            if let Some(key_text) = key_text {
+                            
+                            let should_increase_font = match key_text {
+                                Some("=" | "+") => true,
+                                _ => {
+                                    // Also check physical key for the equal/plus key
+                                    if let PhysicalKey::Code(KeyCode::Equal) = event.physical_key {
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            };
+                            
+                            if should_increase_font {
+                                // Increase font size
+                                font_size = (font_size + 2.0).min(48.0);
+                                info!("Increased font size to {}", font_size);
+                                // Update config and save
+                                config.appearance.font_size = font_size;
+                                let _ = config.save(None);
+                                // TODO: Recreate renderer with new font size
+                                // For now, requires restart to take effect
+                                return;  // Don't process as text input
+                            } else if let Some(key_text) = key_text {
                                 match key_text {
-                                "=" | "+" => {
-                                    // Increase font size
-                                    font_size = (font_size + 2.0).min(48.0);
-                                    info!("Increased font size to {}", font_size);
-                                    // Update config and save
-                                    config.appearance.font_size = font_size;
-                                    let _ = config.save(None);
-                                    // TODO: Recreate renderer with new font size
-                                    // For now, requires restart to take effect
-                                }
-                                "-" => {
-                                    // Decrease font size
-                                    font_size = (font_size - 2.0).max(8.0);
-                                    info!("Decreased font size to {}", font_size);
-                                    // Update config and save
-                                    config.appearance.font_size = font_size;
-                                    let _ = config.save(None);
-                                    // TODO: Recreate renderer with new font size
-                                }
-                                "0" => {
-                                    // Reset to default (14.0)
-                                    font_size = 14.0;
-                                    info!("Reset font size to default (14.0)");
-                                    config.appearance.font_size = font_size;
-                                    let _ = config.save(None);
-                                    // TODO: Recreate renderer with new font size
-                                }
-                                _ => {}
+                                    "-" => {
+                                        // Decrease font size
+                                        font_size = (font_size - 2.0).max(8.0);
+                                        info!("Decreased font size to {}", font_size);
+                                        // Update config and save
+                                        config.appearance.font_size = font_size;
+                                        let _ = config.save(None);
+                                        // TODO: Recreate renderer with new font size
+                                        return;  // Don't process as text input
+                                    }
+                                    "0" => {
+                                        // Reset to default (14.0)
+                                        font_size = 14.0;
+                                        info!("Reset font size to default (14.0)");
+                                        config.appearance.font_size = font_size;
+                                        let _ = config.save(None);
+                                        // TODO: Recreate renderer with new font size
+                                        return;  // Don't process as text input
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
