@@ -8,8 +8,9 @@ use saternal_core::{Config, Renderer};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, WindowEvent, ElementState},
     event_loop::{ControlFlow, EventLoop},
+    keyboard::{PhysicalKey, KeyCode},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::WindowBuilder,
 };
@@ -23,6 +24,7 @@ pub struct App<'a> {
     tab_manager: Arc<Mutex<TabManager>>,
     dropdown: Arc<Mutex<DropdownWindow>>,
     hotkey_manager: Arc<HotkeyManager>,
+    font_size: f32,  // Current font size (dynamically adjustable)
 }
 
 // SAFETY: The App struct is self-referential - renderer borrows from window.
@@ -119,6 +121,8 @@ impl<'a> App<'a> {
             }
         }
 
+        let font_size = config.appearance.font_size;
+
         Ok(Self {
             config,
             event_loop,
@@ -127,19 +131,19 @@ impl<'a> App<'a> {
             tab_manager,
             dropdown,
             hotkey_manager,
+            font_size,
         })
     }
 
     /// Run the application event loop
-    pub fn run(self) -> Result<()> {
-        let Self {
-            event_loop,
-            window,
-            renderer,
-            tab_manager,
-            hotkey_manager,
-            ..
-        } = self;
+    pub fn run(mut self) -> Result<()> {
+        let event_loop = self.event_loop;
+        let window = self.window.clone();
+        let renderer = self.renderer.clone();
+        let tab_manager = self.tab_manager.clone();
+        let hotkey_manager = self.hotkey_manager.clone();
+        let mut font_size = self.font_size;
+        let mut config = self.config.clone();
 
         info!("Starting event loop");
 
@@ -170,7 +174,77 @@ impl<'a> App<'a> {
                 Event::WindowEvent {
                     event: WindowEvent::KeyboardInput { event, .. },
                     ..
-                } if event.text.is_some() => {
+                } => {
+                    // Only handle key presses, not releases
+                    if event.state == ElementState::Pressed {
+                        let modifiers = event.modifiers.state();
+                        let ctrl = modifiers.control_key();
+                        let cmd = modifiers.super_key();  // Cmd on macOS
+
+                        // Handle Cmd+[key] hotkeys for font size adjustment
+                        if cmd && event.logical_key.to_text().is_some() {
+                            let key_text = event.logical_key.to_text().unwrap();
+                            match key_text {
+                                "=" | "+" => {
+                                    // Increase font size
+                                    font_size = (font_size + 2.0).min(48.0);
+                                    info!("Increased font size to {}", font_size);
+                                    // Update config and save
+                                    config.appearance.font_size = font_size;
+                                    let _ = config.save(None);
+                                    // TODO: Recreate renderer with new font size
+                                    // For now, requires restart to take effect
+                                }
+                                "-" => {
+                                    // Decrease font size
+                                    font_size = (font_size - 2.0).max(8.0);
+                                    info!("Decreased font size to {}", font_size);
+                                    // Update config and save
+                                    config.appearance.font_size = font_size;
+                                    let _ = config.save(None);
+                                    // TODO: Recreate renderer with new font size
+                                }
+                                "0" => {
+                                    // Reset to default (14.0)
+                                    font_size = 14.0;
+                                    info!("Reset font size to default (14.0)");
+                                    config.appearance.font_size = font_size;
+                                    let _ = config.save(None);
+                                    // TODO: Recreate renderer with new font size
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // Handle Ctrl+[key] control characters (Ctrl+C, Ctrl+D, etc.)
+                        if ctrl {
+                            if let PhysicalKey::Code(code) = event.physical_key {
+                                let control_char: Option<u8> = match code {
+                                    KeyCode::KeyC => Some(0x03),  // Ctrl+C → ETX (SIGINT)
+                                    KeyCode::KeyD => Some(0x04),  // Ctrl+D → EOT (EOF)
+                                    KeyCode::KeyZ => Some(0x1a),  // Ctrl+Z → SUB (SIGTSTP)
+                                    KeyCode::KeyL => Some(0x0c),  // Ctrl+L → FF (clear screen)
+                                    KeyCode::KeyU => Some(0x15),  // Ctrl+U → NAK (kill line)
+                                    KeyCode::KeyW => Some(0x17),  // Ctrl+W → ETB (delete word)
+                                    KeyCode::KeyA => Some(0x01),  // Ctrl+A → SOH (beginning of line)
+                                    KeyCode::KeyE => Some(0x05),  // Ctrl+E → ENQ (end of line)
+                                    KeyCode::KeyK => Some(0x0b),  // Ctrl+K → VT (kill to end)
+                                    KeyCode::KeyR => Some(0x12),  // Ctrl+R → DC2 (reverse search)
+                                    _ => None,
+                                };
+
+                                if let Some(byte) = control_char {
+                                    debug!("Sending control character: 0x{:02x}", byte);
+                                    if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                        let _ = active_tab.write_input(&[byte]);
+                                    }
+                                    return;  // Don't process as text
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle regular text input
                     if let Some(text) = &event.text {
                         debug!("Received text: {}", text);
                         // Send input to active terminal
