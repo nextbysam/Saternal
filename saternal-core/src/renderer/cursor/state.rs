@@ -141,15 +141,22 @@ impl CursorState {
         let ndc_x = (pixel_x / window_width as f32) * 2.0 - 1.0;
         let ndc_y = -((pixel_y / window_height as f32) * 2.0 - 1.0); // Flip Y
 
-        // Calculate NDC size based on style (thinner cursor)
+        // Calculate size based on style (exact pixel widths)
         let (width, height) = match self.config.style {
             CursorStyle::Block => (cell_width, cell_height),
-            CursorStyle::Beam => (1.5, cell_height),  // Thinner beam
-            CursorStyle::Underline => (cell_width, 1.5),  // Thinner underline
+            CursorStyle::Beam => (2.0, cell_height),  // 2px wide beam
+            CursorStyle::Underline => (cell_width, 2.0),  // 2px tall underline
         };
 
         let ndc_width = (width / window_width as f32) * 2.0;
         let ndc_height = -((height / window_height as f32) * 2.0); // Negative to extend downward in NDC
+        
+        // For underline, adjust Y position to bottom of cell
+        let ndc_y = if matches!(self.config.style, CursorStyle::Underline) {
+            ndc_y + (cell_height - 2.0) / window_height as f32 * 2.0
+        } else {
+            ndc_y
+        };
 
         // Determine visibility
         let visible = if should_hide {

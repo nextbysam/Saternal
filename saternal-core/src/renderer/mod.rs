@@ -317,6 +317,11 @@ impl<'a> Renderer<'a> {
         &mut self.font_manager
     }
 
+    /// Get current scroll offset
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
     /// Update font size and recalculate cell dimensions
     pub fn set_font_size(&mut self, font_size: f32) -> Result<()> {
         // Update font manager

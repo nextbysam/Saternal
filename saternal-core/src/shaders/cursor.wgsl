@@ -32,21 +32,9 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         default: { local = vec2<f32>(0.0, 1.0); }  // Bottom-left
     }
     
-    // Adjust size based on cursor style
-    var size = cursor.size;
-    var pos = cursor.position;
-    
-    if (cursor.style == 1u) {
-        // Beam: thin vertical line
-        size.x = size.x * 0.03;  // Thinner beam (1-2px depending on resolution)
-    } else if (cursor.style == 2u) {
-        // Underline: thin horizontal line at bottom
-        size.y = size.y * 0.08;  // Thinner underline
-        pos.y = pos.y + cursor.size.y * 0.92;  // Position at bottom
-    }
-    
-    // Transform to NDC
-    let final_pos = pos + local * size;
+    // Size and position are pre-calculated in Rust based on cursor style
+    // No need for shader-side adjustments - keeps the GPU work minimal
+    let final_pos = cursor.position + local * cursor.size;
     output.position = vec4<f32>(final_pos, 0.0, 1.0);
     output.local_pos = local;
     
