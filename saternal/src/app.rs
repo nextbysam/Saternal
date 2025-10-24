@@ -163,7 +163,7 @@ impl<'a> App<'a> {
     }
 
     /// Run the application event loop
-    pub fn run(mut self) -> Result<()> {
+    pub fn run(self) -> Result<()> {
         let event_loop = self.event_loop;
         let window = self.window.clone();
         let renderer = self.renderer.clone();
@@ -499,7 +499,7 @@ impl<'a> App<'a> {
                 } => {
                     // Phase 2: Update mouse position and selection
                     // Get cell dimensions from renderer
-                    if let Some(renderer_lock) = renderer.try_lock() {
+                    if let Some(mut renderer_lock) = renderer.try_lock() {
                         let fm = renderer_lock.font_manager();
                         let line_metrics = fm.font().horizontal_line_metrics(fm.font_size()).unwrap();
                         let cell_width = fm.font().metrics('M', fm.font_size()).advance_width;

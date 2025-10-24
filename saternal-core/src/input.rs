@@ -109,7 +109,7 @@ impl InputModifiers {
 }
 
 /// Check if key combination is "jump to bottom" (Shift+G or Shift+End)
-pub fn is_jump_to_bottom(key: &Key, physical_key: KeyCode, mods: InputModifiers) -> bool {
+pub fn is_jump_to_bottom(_key: &Key, physical_key: KeyCode, mods: InputModifiers) -> bool {
     // Shift+G (vim-style)
     if mods.shift && !mods.ctrl && !mods.alt && physical_key == KeyCode::KeyG {
         return true;
@@ -271,7 +271,7 @@ fn arrow_sequence(letter: u8, mods: InputModifiers) -> Option<Vec<u8>> {
 
 /// Generate navigation key sequences (Home/End)
 /// Can use either ESC[H or ESC[1~ style depending on terminal mode
-fn navigation_sequence(letter: u8, tilde_code: u8, mods: InputModifiers) -> Option<Vec<u8>> {
+fn navigation_sequence(letter: u8, _tilde_code: u8, mods: InputModifiers) -> Option<Vec<u8>> {
     if mods.ctrl || mods.shift || mods.alt {
         // Modified: ESC[1;{mod}H
         let mod_code = mods.xterm_modifier_code();
@@ -305,7 +305,7 @@ pub fn bracket_paste(text: &str) -> Vec<u8> {
 pub fn pixel_to_grid(pixel_x: f32, pixel_y: f32, cell_width: f32, cell_height: f32) -> Point {
     let col = (pixel_x / cell_width).floor() as usize;
     let line = (pixel_y / cell_height).floor() as usize;
-    Point::new(Line(line), Column(col))
+    Point::new(Line(line as i32), Column(col))
 }
 
 #[cfg(test)]

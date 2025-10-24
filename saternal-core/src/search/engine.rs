@@ -41,14 +41,14 @@ impl SearchEngine {
         let num_cols = grid.columns();
         
         // Convert grid to searchable text with position mapping
-        let mut current_line = start.line.0;
+        let mut current_line = start.line.0 as usize;
         let mut current_col = start.column.0;
 
         while current_line < num_lines {
-            let line_start_col = if current_line == start.line.0 { current_col } else { 0 };
+            let line_start_col = if current_line == start.line.0 as usize { current_col } else { 0 };
             
             if let Some(match_col) = self.search_line(grid, current_line, line_start_col, num_cols) {
-                return Some(Point::new(Line(current_line), Column(match_col)));
+                return Some(Point::new(Line(current_line as i32), Column(match_col)));
             }
             
             current_line += 1;
@@ -65,17 +65,17 @@ impl SearchEngine {
         }
 
         let num_cols = grid.columns();
-        let mut current_line = start.line.0;
+        let mut current_line = start.line.0 as usize;
         
         loop {
-            let line_end_col = if current_line == start.line.0 { 
+            let line_end_col = if current_line == start.line.0 as usize { 
                 start.column.0.saturating_sub(1)
             } else { 
                 num_cols.saturating_sub(1)
             };
             
             if let Some(match_col) = self.search_line_reverse(grid, current_line, 0, line_end_col) {
-                return Some(Point::new(Line(current_line), Column(match_col)));
+                return Some(Point::new(Line(current_line as i32), Column(match_col)));
             }
             
             if current_line == 0 {
@@ -101,7 +101,7 @@ impl SearchEngine {
             let mut col = 0;
             while col < num_cols {
                 if let Some(match_col) = self.search_line(grid, line, col, num_cols) {
-                    matches.push(Point::new(Line(line), Column(match_col)));
+                    matches.push(Point::new(Line(line as i32), Column(match_col)));
                     col = match_col + self.pattern.len();
                     
                     if matches.len() >= max_matches {
@@ -134,7 +134,8 @@ impl SearchEngine {
             for i in 0..pattern_len {
                 let point = Point::new(Line(line as i32), Column(pos + i));
                 let cell = &grid[point];
-                if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
+                let pattern_char = pattern_bytes[i].to_ascii_lowercase() as char;
+                if cell.c.to_lowercase().next() != Some(pattern_char) {
                     matched = false;
                     
                     // Use bad character rule for skip
@@ -171,7 +172,8 @@ impl SearchEngine {
             for i in 0..pattern_len {
                 let point = Point::new(Line(line as i32), Column(pos + i));
                 let cell = &grid[point];
-                if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
+                let pattern_char = pattern_bytes[i].to_ascii_lowercase() as char;
+                if cell.c.to_lowercase().next() != Some(pattern_char) {
                     matched = false;
                     break;
                 }
