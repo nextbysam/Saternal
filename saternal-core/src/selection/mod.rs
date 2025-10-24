@@ -71,10 +71,9 @@ impl SelectionManager {
             let line_end = if line == end.line.0 { end.column.0 } else { grid.columns() - 1 };
             
             for col in line_start..=line_end {
-                let point = Point::new(alacritty_terminal::index::Line(line), alacritty_terminal::index::Column(col));
-                if let Some(cell) = grid.get(point) {
-                    text.push(cell.c);
-                }
+                let point = Point::new(alacritty_terminal::index::Line(line as i32), alacritty_terminal::index::Column(col));
+                let cell = &grid[point];
+                text.push(cell.c);
             }
             
             // Add newline between lines (except for last line)

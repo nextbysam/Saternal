@@ -123,7 +123,7 @@ impl SearchState {
             current
         } else {
             Point::new(
-                alacritty_terminal::index::Line(grid.screen_lines().saturating_sub(1)),
+                alacritty_terminal::index::Line(grid.screen_lines().saturating_sub(1) as i32),
                 alacritty_terminal::index::Column(grid.columns().saturating_sub(1))
             )
         };
@@ -135,7 +135,7 @@ impl SearchState {
         } else {
             // Wrap around to end
             let wrapped = engine.find_prev(grid, Point::new(
-                alacritty_terminal::index::Line(grid.screen_lines().saturating_sub(1)),
+                alacritty_terminal::index::Line(grid.screen_lines().saturating_sub(1) as i32),
                 alacritty_terminal::index::Column(grid.columns().saturating_sub(1))
             ));
             if wrapped.is_some() {

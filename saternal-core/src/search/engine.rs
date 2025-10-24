@@ -132,24 +132,16 @@ impl SearchEngine {
             
             // Check if pattern matches at current position
             for i in 0..pattern_len {
-                let point = Point::new(Line(line), Column(pos + i));
-                if let Some(cell) = grid.get(point) {
-                    if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
-                        matched = false;
-                        
-                        // Use bad character rule for skip
-                        let last_char_point = Point::new(Line(line), Column(pos + pattern_len - 1));
-                        if let Some(last_cell) = grid.get(last_char_point) {
-                            let skip = self.bad_char_table[last_cell.c as usize];
-                            pos += skip.max(1);
-                        } else {
-                            pos += 1;
-                        }
-                        break;
-                    }
-                } else {
+                let point = Point::new(Line(line as i32), Column(pos + i));
+                let cell = &grid[point];
+                if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
                     matched = false;
-                    pos += 1;
+                    
+                    // Use bad character rule for skip
+                    let last_char_point = Point::new(Line(line as i32), Column(pos + pattern_len - 1));
+                    let last_cell = &grid[last_char_point];
+                    let skip = self.bad_char_table[last_cell.c as usize];
+                    pos += skip.max(1);
                     break;
                 }
             }
@@ -177,13 +169,9 @@ impl SearchEngine {
             let mut matched = true;
             
             for i in 0..pattern_len {
-                let point = Point::new(Line(line), Column(pos + i));
-                if let Some(cell) = grid.get(point) {
-                    if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
-                        matched = false;
-                        break;
-                    }
-                } else {
+                let point = Point::new(Line(line as i32), Column(pos + i));
+                let cell = &grid[point];
+                if cell.c.to_lowercase().next() != pattern_bytes[i].to_ascii_lowercase() as char {
                     matched = false;
                     break;
                 }

@@ -5,11 +5,11 @@ use alacritty_terminal::term::cell::Cell;
 use super::range::{SelectionRange, SelectionMode};
 
 /// Expand selection to include the word at the given point
-pub fn expand_word<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange> {
+pub fn expand_word(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange> {
     let num_cols = grid.columns();
     let num_lines = grid.screen_lines();
     
-    if point.line.0 >= num_lines || point.column.0 >= num_cols {
+    if point.line.0 < 0 || point.line.0 >= num_lines as i32 || point.column.0 >= num_cols {
         return None;
     }
 
@@ -23,12 +23,9 @@ pub fn expand_word<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange>
     // Expand left
     while start_col > 0 {
         let p = Point::new(line_index, Column(start_col - 1));
-        if let Some(cell) = grid.get(p) {
-            if is_word_char(cell.c) {
-                start_col -= 1;
-            } else {
-                break;
-            }
+        let cell = &grid[p];
+        if is_word_char(cell.c) {
+            start_col -= 1;
         } else {
             break;
         }
@@ -37,12 +34,9 @@ pub fn expand_word<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange>
     // Expand right
     while end_col < num_cols - 1 {
         let p = Point::new(line_index, Column(end_col + 1));
-        if let Some(cell) = grid.get(p) {
-            if is_word_char(cell.c) {
-                end_col += 1;
-            } else {
-                break;
-            }
+        let cell = &grid[p];
+        if is_word_char(cell.c) {
+            end_col += 1;
         } else {
             break;
         }
@@ -56,7 +50,7 @@ pub fn expand_word<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange>
 }
 
 /// Expand selection to include the entire line
-pub fn expand_line<T>(grid: &Grid<Cell>, point: Point) -> SelectionRange {
+pub fn expand_line(grid: &Grid<Cell>, point: Point) -> SelectionRange {
     let num_cols = grid.columns();
     
     SelectionRange::new(
@@ -73,7 +67,7 @@ fn is_word_char(c: char) -> bool {
 }
 
 /// Detect if selection looks like a URL and expand accordingly
-pub fn expand_url<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange> {
+pub fn expand_url(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange> {
     // First expand as word
     let mut range = expand_word(grid, point)?;
     
@@ -88,7 +82,7 @@ pub fn expand_url<T>(grid: &Grid<Cell>, point: Point) -> Option<SelectionRange> 
 }
 
 /// Expand range until whitespace is encountered
-fn expand_until_whitespace<T>(grid: &Grid<Cell>, range: SelectionRange) -> SelectionRange {
+fn expand_until_whitespace(grid: &Grid<Cell>, range: SelectionRange) -> SelectionRange {
     let num_cols = grid.columns();
     let mut start = range.start;
     let mut end = range.end;
@@ -96,12 +90,9 @@ fn expand_until_whitespace<T>(grid: &Grid<Cell>, range: SelectionRange) -> Selec
     // Expand left
     while start.column.0 > 0 {
         let p = Point::new(start.line, Column(start.column.0 - 1));
-        if let Some(cell) = grid.get(p) {
-            if !cell.c.is_whitespace() {
-                start.column = Column(start.column.0 - 1);
-            } else {
-                break;
-            }
+        let cell = &grid[p];
+        if !cell.c.is_whitespace() {
+            start.column = Column(start.column.0 - 1);
         } else {
             break;
         }
@@ -110,12 +101,9 @@ fn expand_until_whitespace<T>(grid: &Grid<Cell>, range: SelectionRange) -> Selec
     // Expand right
     while end.column.0 < num_cols - 1 {
         let p = Point::new(end.line, Column(end.column.0 + 1));
-        if let Some(cell) = grid.get(p) {
-            if !cell.c.is_whitespace() {
-                end.column = Column(end.column.0 + 1);
-            } else {
-                break;
-            }
+        let cell = &grid[p];
+        if !cell.c.is_whitespace() {
+            end.column = Column(end.column.0 + 1);
         } else {
             break;
         }
@@ -135,9 +123,8 @@ fn extract_text(grid: &Grid<Cell>, range: SelectionRange) -> String {
         
         for col in line_start..=line_end {
             let p = Point::new(Line(line), Column(col));
-            if let Some(cell) = grid.get(p) {
-                text.push(cell.c);
-            }
+            let cell = &grid[p];
+            text.push(cell.c);
         }
     }
     

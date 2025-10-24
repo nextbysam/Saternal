@@ -162,7 +162,7 @@ impl SelectionRenderer {
         if start.line == end.line {
             // Single line selection
             let span = self.create_span(
-                start.line.0,
+                start.line.0 as usize,
                 start.column.0,
                 end.column.0 - start.column.0 + 1,
                 cell_width,
@@ -175,7 +175,7 @@ impl SelectionRenderer {
             // Multi-line selection
             // First line (from start to end of line)
             let first_span = self.create_span(
-                start.line.0,
+                start.line.0 as usize,
                 start.column.0,
                 grid_cols - start.column.0,
                 cell_width,
@@ -188,7 +188,7 @@ impl SelectionRenderer {
             // Middle lines (full width)
             for line in (start.line.0 + 1)..end.line.0 {
                 let span = self.create_span(
-                    line,
+                    line as usize,
                     0,
                     grid_cols,
                     cell_width,
@@ -201,7 +201,7 @@ impl SelectionRenderer {
 
             // Last line (from start of line to end)
             let last_span = self.create_span(
-                end.line.0,
+                end.line.0 as usize,
                 0,
                 end.column.0 + 1,
                 cell_width,
