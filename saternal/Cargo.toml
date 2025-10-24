@@ -23,6 +23,9 @@ osx_minimum_system_version = "11.0"
 saternal-core = { path = "../saternal-core" }
 saternal-macos = { path = "../saternal-macos" }
 
+# Terminal emulation
+alacritty_terminal.workspace = true
+
 # Window and rendering
 winit.workspace = true
 wgpu.workspace = true

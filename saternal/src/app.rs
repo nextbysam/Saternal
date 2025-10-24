@@ -1,4 +1,5 @@
 use crate::tab::TabManager;
+use alacritty_terminal::grid::Dimensions;
 use anyhow::Result;
 use cocoa::base::id;
 use log::{debug, info};
@@ -356,8 +357,9 @@ impl<'a> App<'a> {
                                 .and_then(|tab| tab.pane_tree.focused_pane()) 
                             {
                                 let term_arc = pane.terminal.term();
+                                // Get history size from the terminal (it's available on Term, not Grid)
                                 let history_size = if let Some(term_lock) = term_arc.try_lock() {
-                                    term_lock.grid().history_size()
+                                    term_lock.history_size()
                                 } else {
                                     0
                                 };
