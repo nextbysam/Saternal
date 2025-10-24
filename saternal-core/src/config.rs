@@ -45,6 +45,10 @@ pub struct AppearanceConfig {
     /// Cursor configuration
     #[serde(default)]
     pub cursor: CursorConfig,
+    /// DPI scale override (None = auto-detect from system)
+    /// Useful for edge cases like VNC, VMs, or unusual display setups
+    #[serde(default)]
+    pub dpi_scale_override: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

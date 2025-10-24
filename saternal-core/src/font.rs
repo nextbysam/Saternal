@@ -6,7 +6,8 @@ use std::collections::HashMap;
 /// Manages font loading and glyph rasterization
 pub struct FontManager {
     font: Font,
-    font_size: f32,
+    configured_font_size: f32,      // Logical size from config
+    current_scale_factor: f64,       // Current DPI scale (1.0, 2.0, etc.)
     /// Cache of rasterized glyphs: (char, size) -> (width, height, bitmap)
     glyph_cache: HashMap<(char, u32), (usize, usize, Vec<u8>)>,
 }
@@ -14,7 +15,12 @@ pub struct FontManager {
 impl FontManager {
     /// Load a font from the system
     pub fn new(font_family: &str, font_size: f32) -> Result<Self> {
-        info!("Loading font: {} at size {}", font_family, font_size);
+        Self::new_with_scale(font_family, font_size, 1.0)
+    }
+
+    /// Load a font with explicit scale factor (DPI-aware)
+    pub fn new_with_scale(font_family: &str, font_size: f32, scale_factor: f64) -> Result<Self> {
+        info!("Loading font: {} at size {} (scale: {}x)", font_family, font_size, scale_factor);
 
         // For now, load a default monospace font
         // In production, we'd search system fonts
@@ -25,7 +31,8 @@ impl FontManager {
 
         Ok(Self {
             font,
-            font_size,
+            configured_font_size: font_size,
+            current_scale_factor: scale_factor,
             glyph_cache: HashMap::new(),
         })
     }
@@ -49,12 +56,28 @@ impl FontManager {
         anyhow::bail!("Could not find any monospace font")
     }
 
+    /// Get effective font size (logical size * DPI scale)
+    pub fn effective_font_size(&self) -> f32 {
+        (self.configured_font_size * self.current_scale_factor as f32)
+    }
+
+    /// Update DPI scale factor and clear cache if changed
+    pub fn update_scale_factor(&mut self, scale_factor: f64) {
+        if (self.current_scale_factor - scale_factor).abs() > 0.001 {
+            info!("DPI scale factor changed: {:.2}x -> {:.2}x", 
+                  self.current_scale_factor, scale_factor);
+            self.current_scale_factor = scale_factor;
+            self.glyph_cache.clear();
+        }
+    }
+
     /// Get or rasterize a glyph
     pub fn get_glyph(&mut self, ch: char) -> Result<&(usize, usize, Vec<u8>)> {
-        let size_key = (self.font_size * 2.0) as u32; // Scale for retina
+        let effective_size = self.effective_font_size();
+        let size_key = effective_size.round() as u32;
 
         if !self.glyph_cache.contains_key(&(ch, size_key)) {
-            let (metrics, bitmap) = self.font.rasterize(ch, self.font_size);
+            let (metrics, bitmap) = self.font.rasterize(ch, effective_size);
 
             // Convert grayscale to RGBA
             let mut rgba_bitmap = Vec::with_capacity(bitmap.len() * 4);
@@ -79,15 +102,20 @@ impl FontManager {
         }
     }
 
-    /// Get font size
+    /// Get configured (logical) font size
     pub fn font_size(&self) -> f32 {
-        self.font_size
+        self.configured_font_size
     }
 
     /// Update font size and clear cache
     pub fn set_font_size(&mut self, size: f32) {
-        self.font_size = size;
+        self.configured_font_size = size;
         self.glyph_cache.clear();
+    }
+
+    /// Get current scale factor
+    pub fn scale_factor(&self) -> f64 {
+        self.current_scale_factor
     }
 
     /// Clear glyph cache (useful for memory management)
@@ -102,6 +130,6 @@ impl FontManager {
 
     /// Rasterize a glyph (returns metrics and grayscale bitmap)
     pub fn rasterize(&self, ch: char) -> (fontdue::Metrics, Vec<u8>) {
-        self.font.rasterize(ch, self.font_size)
+        self.font.rasterize(ch, self.effective_font_size())
     }
 }

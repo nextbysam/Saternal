@@ -99,12 +99,15 @@ impl<'a> Renderer<'a> {
         // Initialize GPU context
         let gpu = GpuContext::new(window).await?;
 
-        let font_manager = FontManager::new(font_family, font_size)?;
+        // Get current DPI scale factor
+        let scale_factor = window.scale_factor();
+        let font_manager = FontManager::new_with_scale(font_family, font_size, scale_factor)?;
 
-        // Calculate cell dimensions and baseline
+        // Calculate cell dimensions and baseline using effective font size
         let (cell_width, cell_height, baseline_offset) = {
-            let line_metrics = font_manager.font().horizontal_line_metrics(font_size).unwrap();
-            let cell_width = font_manager.font().metrics('M', font_size).advance_width;
+            let effective_size = font_manager.effective_font_size();
+            let line_metrics = font_manager.font().horizontal_line_metrics(effective_size).unwrap();
+            let cell_width = font_manager.font().metrics('M', effective_size).advance_width;
             let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
             let baseline_offset = line_metrics.ascent.ceil();
             (cell_width, cell_height, baseline_offset)
@@ -418,16 +421,40 @@ impl<'a> Renderer<'a> {
         self.font_manager.set_font_size(font_size);
         
         // Recalculate cell dimensions
-        let line_metrics = self.font_manager.font().horizontal_line_metrics(font_size).unwrap();
-        let cell_width = self.font_manager.font().metrics('M', font_size).advance_width;
+        let effective_size = self.font_manager.effective_font_size();
+        let line_metrics = self.font_manager.font().horizontal_line_metrics(effective_size).unwrap();
+        let cell_width = self.font_manager.font().metrics('M', effective_size).advance_width;
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let baseline_offset = line_metrics.ascent.ceil();
         
         // Update text rasterizer
         self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
         
-        info!("Font size updated to {}: cell={}x{}, baseline={}", 
-              font_size, cell_width, cell_height, baseline_offset);
+        info!("Font size updated to {} (effective: {}): cell={}x{}, baseline={}", 
+              font_size, effective_size, cell_width, cell_height, baseline_offset);
+        
+        Ok(())
+    }
+
+    /// Handle DPI scale factor change (monitor change, etc.)
+    pub fn handle_scale_factor_changed(&mut self, scale_factor: f64) -> Result<()> {
+        info!("Scale factor changed to: {:.2}x", scale_factor);
+        
+        // Update font manager with new scale
+        self.font_manager.update_scale_factor(scale_factor);
+        
+        // Recalculate cell dimensions with new effective font size
+        let effective_size = self.font_manager.effective_font_size();
+        let line_metrics = self.font_manager.font().horizontal_line_metrics(effective_size).unwrap();
+        let cell_width = self.font_manager.font().metrics('M', effective_size).advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+        let baseline_offset = line_metrics.ascent.ceil();
+        
+        // Update text rasterizer
+        self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
+        
+        info!("DPI updated: effective font size={}, cell={}x{}", 
+              effective_size, cell_width, cell_height);
         
         Ok(())
     }

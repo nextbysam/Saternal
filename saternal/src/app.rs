@@ -116,7 +116,7 @@ impl<'a> App<'a> {
         };
         
         // Now create the renderer with the extended lifetime
-        let renderer = Renderer::new(
+        let mut renderer = Renderer::new(
             window_static,
             &config.appearance.font_family,
             config.appearance.font_size,
@@ -124,6 +124,13 @@ impl<'a> App<'a> {
             config.appearance.palette,
         )
         .await?;
+        
+        // Apply DPI scale override if configured
+        if let Some(scale_override) = config.appearance.dpi_scale_override {
+            info!("Applying DPI scale override: {:.2}x", scale_override);
+            renderer.handle_scale_factor_changed(scale_override)?;
+        }
+        
         let renderer = Arc::new(Mutex::new(renderer));
 
         // IMPORTANT: Configure Metal layer AFTER wgpu creates it
@@ -210,6 +217,18 @@ impl<'a> App<'a> {
                     debug!("Window resized: {:?}", size);
                     let mut renderer = renderer.lock();
                     renderer.resize(size.width, size.height);
+                }
+
+                Event::WindowEvent {
+                    event: WindowEvent::ScaleFactorChanged { scale_factor, .. },
+                    ..
+                } => {
+                    info!("Scale factor changed: {:.2}x", scale_factor);
+                    let mut renderer = renderer.lock();
+                    if let Err(e) = renderer.handle_scale_factor_changed(scale_factor) {
+                        log::error!("Failed to handle scale factor change: {}", e);
+                    }
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
