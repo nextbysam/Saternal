@@ -80,14 +80,7 @@ impl<'a> App<'a> {
         }
         let dropdown = Arc::new(Mutex::new(dropdown));
 
-
-
-        // Calculate initial terminal size from window (will be properly sized after renderer is ready)
-        // Using default 80x24 for now, will resize after window is shown
-        let tab_manager = TabManager::new(config.terminal.shell.clone())?;
-        let tab_manager = Arc::new(Mutex::new(tab_manager));
-
-        // Setup global hotkey
+        // Setup global hotkey (before renderer)
         let window_clone = window.clone();
         let dropdown_clone = dropdown.clone();
         let hotkey_manager = HotkeyManager::new(move || {
@@ -132,6 +125,15 @@ impl<'a> App<'a> {
             renderer.handle_scale_factor_changed(scale_override)?;
         }
         
+        // Calculate proper terminal size from window dimensions BEFORE creating terminals
+        let window_size = window.inner_size();
+        let effective_size = renderer.font_manager().effective_font_size();
+        let line_metrics = renderer.font_manager().font().horizontal_line_metrics(effective_size).unwrap();
+        let cell_width = renderer.font_manager().font().metrics('M', effective_size).advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+        let (initial_cols, initial_rows) = Self::calculate_terminal_size(window_size.width, window_size.height, cell_width, cell_height);
+        info!("Calculated initial terminal size: {}x{} for window {}x{}", initial_cols, initial_rows, window_size.width, window_size.height);
+        
         let renderer = Arc::new(Mutex::new(renderer));
 
         // IMPORTANT: Configure Metal layer AFTER wgpu creates it
@@ -145,6 +147,10 @@ impl<'a> App<'a> {
                 }
             }
         }
+
+        // Create tab manager with properly sized terminal from the start
+        let tab_manager = TabManager::new_with_size(config.terminal.shell.clone(), initial_cols, initial_rows)?;
+        let tab_manager = Arc::new(Mutex::new(tab_manager));
 
         let font_size = config.appearance.font_size;
 
@@ -195,9 +201,6 @@ impl<'a> App<'a> {
         let mut clipboard = self.clipboard;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
-        
-        // Track if initial terminal sizing has been done
-        let mut initial_resize_done = false;
 
         info!("Starting event loop");
 
@@ -623,30 +626,6 @@ impl<'a> App<'a> {
                 }
 
                 Event::AboutToWait => {
-                    // Perform initial terminal sizing on first frame
-                    if !initial_resize_done {
-                        let window_size = window.inner_size();
-                        let mut renderer_locked = renderer.lock();
-                        let font_mgr = renderer_locked.font_manager();
-                        let effective_size = font_mgr.effective_font_size();
-                        let line_metrics = font_mgr.font().horizontal_line_metrics(effective_size).unwrap();
-                        let cell_width = font_mgr.font().metrics('M', effective_size).advance_width;
-                        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
-                        drop(renderer_locked);
-                        
-                        let (cols, rows) = Self::calculate_terminal_size(window_size.width, window_size.height, cell_width, cell_height);
-                        info!("Initial terminal resize to {}x{} based on window {}x{}", cols, rows, window_size.width, window_size.height);
-                        
-                        if let Some(mut tab_mgr) = tab_manager.try_lock() {
-                            if let Some(active_tab) = tab_mgr.active_tab_mut() {
-                                if let Err(e) = active_tab.resize(cols, rows) {
-                                    log::error!("Failed to resize terminal initially: {}", e);
-                                }
-                            }
-                        }
-                        initial_resize_done = true;
-                    }
-                    
                     // Process terminal output
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {

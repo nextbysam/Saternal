@@ -77,10 +77,14 @@ pub struct TabManager {
 
 impl TabManager {
     pub fn new(shell: String) -> Result<Self> {
-        info!("Creating tab manager");
+        Self::new_with_size(shell, 80, 24)
+    }
+    
+    pub fn new_with_size(shell: String, cols: usize, rows: usize) -> Result<Self> {
+        info!("Creating tab manager with terminal size {}x{}", cols, rows);
 
-        // Start with one tab
-        let mut tab = Tab::new(0, Some(shell.clone()))?;
+        // Start with one tab at the specified size
+        let mut tab = Tab::new_with_size(0, cols, rows, Some(shell.clone()))?;
 
         // Set first pane as focused
         tab.pane_tree.set_focus(0);

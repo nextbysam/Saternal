@@ -139,14 +139,10 @@ impl PaneNode {
         }
     }
 
-    /// Resize all panes in the tree based on available space
-    pub fn resize(&mut self, width: usize, height: usize) -> Result<()> {
+    /// Resize all panes in the tree to specified terminal dimensions (cols x rows)
+    pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         match self {
             PaneNode::Leaf { pane } => {
-                // Calculate cols/rows based on cell size
-                // For now, assume 8x16 cell size (will be updated by renderer)
-                let cols = width / 8;
-                let rows = height / 16;
                 pane.resize(cols.max(1), rows.max(1))?;
             }
             PaneNode::Split {
@@ -156,25 +152,25 @@ impl PaneNode {
             } => {
                 match direction {
                     SplitDirection::Horizontal => {
-                        // Split height
-                        let height1 = (height as f32 * *ratio) as usize;
-                        let height2 = height.saturating_sub(height1);
+                        // Split rows between panes
+                        let rows1 = (rows as f32 * *ratio) as usize;
+                        let rows2 = rows.saturating_sub(rows1);
                         if let Some(child1) = children.get_mut(0) {
-                            child1.resize(width, height1)?;
+                            child1.resize(cols, rows1)?;
                         }
                         if let Some(child2) = children.get_mut(1) {
-                            child2.resize(width, height2)?;
+                            child2.resize(cols, rows2)?;
                         }
                     }
                     SplitDirection::Vertical => {
-                        // Split width
-                        let width1 = (width as f32 * *ratio) as usize;
-                        let width2 = width.saturating_sub(width1);
+                        // Split cols between panes
+                        let cols1 = (cols as f32 * *ratio) as usize;
+                        let cols2 = cols.saturating_sub(cols1);
                         if let Some(child1) = children.get_mut(0) {
-                            child1.resize(width1, height)?;
+                            child1.resize(cols1, rows)?;
                         }
                         if let Some(child2) = children.get_mut(1) {
-                            child2.resize(width2, height)?;
+                            child2.resize(cols2, rows)?;
                         }
                     }
                 }
