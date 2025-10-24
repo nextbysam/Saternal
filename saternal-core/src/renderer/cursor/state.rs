@@ -127,15 +127,19 @@ impl CursorState {
         scroll_offset: usize,
         hide_cursor: bool,
     ) {
+        // Padding constants (must match TextRasterizer padding)
+        const PADDING_LEFT: f32 = 10.0;
+        const PADDING_TOP: f32 = 5.0;
+        
         // Hide cursor if scrolled or terminal mode requests it
         // Unless force_show is enabled (overrides application hide requests)
         let should_hide = scroll_offset > 0 || (hide_cursor && !self.config.force_show);
         
-        // Calculate pixel position in screen coordinates
+        // Calculate pixel position in screen coordinates with padding
         // cursor_pos.line is in grid coordinates (0-indexed from visible top)
         // When not scrolled, line 0 should render at pixel row 0
-        let pixel_x = cursor_pos.column.0 as f32 * cell_width;
-        let pixel_y = cursor_pos.line.0 as f32 * cell_height;
+        let pixel_x = PADDING_LEFT + cursor_pos.column.0 as f32 * cell_width;
+        let pixel_y = PADDING_TOP + cursor_pos.line.0 as f32 * cell_height;
 
         // Convert to normalized device coordinates (-1 to 1)
         let ndc_x = (pixel_x / window_width as f32) * 2.0 - 1.0;

@@ -183,7 +183,7 @@ impl<'a> Renderer<'a> {
                    cursor_pos.column.0, cursor_pos.line.0, 
                    term.mode().contains(TermMode::SHOW_CURSOR), hide_cursor);
         
-        // Use effective_font_size() to account for DPI scaling across monitors
+        // Use effective_font_size() to account for DPI scaling across monitors₹
         let effective_size = self.font_manager.effective_font_size();
         let line_metrics = self.font_manager.font()
             .horizontal_line_metrics(effective_size)

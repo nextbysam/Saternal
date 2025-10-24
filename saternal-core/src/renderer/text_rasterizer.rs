@@ -13,6 +13,8 @@ pub(crate) struct TextRasterizer {
     cell_width: f32,
     cell_height: f32,
     baseline_offset: f32,
+    padding_left: f32,
+    padding_top: f32,
 }
 
 impl TextRasterizer {
@@ -22,6 +24,8 @@ impl TextRasterizer {
             cell_width,
             cell_height,
             baseline_offset,
+            padding_left: 10.0,
+            padding_top: 5.0,
         }
     }
 
@@ -30,6 +34,7 @@ impl TextRasterizer {
         self.cell_width = cell_width;
         self.cell_height = cell_height;
         self.baseline_offset = baseline_offset;
+        // Padding remains the same regardless of font size
     }
 
     /// Render terminal content to texture buffer
@@ -87,9 +92,9 @@ impl TextRasterizer {
                 // Rasterize glyph
                 let (metrics, bitmap) = font_manager.rasterize(c);
 
-                // Calculate cell position in window coordinates
-                let cell_x = col_idx as f32 * self.cell_width;
-                let cell_y = row_idx as f32 * self.cell_height;
+                // Calculate cell position in window coordinates with padding
+                let cell_x = self.padding_left + col_idx as f32 * self.cell_width;
+                let cell_y = self.padding_top + row_idx as f32 * self.cell_height;
 
                 // Calculate baseline position (from top of cell)
                 let baseline_y = cell_y + self.baseline_offset;

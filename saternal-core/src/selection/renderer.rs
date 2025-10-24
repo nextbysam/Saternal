@@ -240,8 +240,12 @@ impl SelectionRenderer {
         window_width: u32,
         window_height: u32,
     ) -> SelectionSpan {
-        let pixel_x = col as f32 * cell_width;
-        let pixel_y = line as f32 * cell_height;
+        // Padding constants (must match TextRasterizer padding)
+        const PADDING_LEFT: f32 = 10.0;
+        const PADDING_TOP: f32 = 5.0;
+        
+        let pixel_x = PADDING_LEFT + col as f32 * cell_width;
+        let pixel_y = PADDING_TOP + line as f32 * cell_height;
         let pixel_width = width_cells as f32 * cell_width;
 
         // Convert to NDC
