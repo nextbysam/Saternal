@@ -23,50 +23,8 @@ use texture::TextureManager;
 pub use theme::ColorPalette;
 use crate::selection::{SelectionRange, SelectionRenderer};
 
-/// Smooth scroll animation using spring physics
-struct ScrollAnimation {
-    target: usize,
-    current: f32,
-    velocity: f32,
-}
-
-impl ScrollAnimation {
-    fn new() -> Self {
-        Self {
-            target: 0,
-            current: 0.0,
-            velocity: 0.0,
-        }
-    }
-    
-    fn update(&mut self, delta_time: f32) -> usize {
-        const SPRING: f32 = 0.3;
-        const DAMPING: f32 = 0.85;
-        
-        let diff = self.target as f32 - self.current;
-        self.velocity += diff * SPRING;
-        self.velocity *= DAMPING;
-        self.current += self.velocity * delta_time * 60.0; // Normalize to 60fps
-        
-        // Snap when close
-        if diff.abs() < 0.1 && self.velocity.abs() < 0.1 {
-            self.current = self.target as f32;
-            self.velocity = 0.0;
-        }
-        
-        self.current.round() as usize
-    }
-    
-    fn set_target(&mut self, target: usize) {
-        self.target = target;
-    }
-    
-    fn reset(&mut self) {
-        self.target = 0;
-        self.current = 0.0;
-        self.velocity = 0.0;
-    }
-}
+// Deleted: ScrollAnimation spring physics (Step 2 - Delete unnecessary complexity)
+// Replaced with simple fractional scrolling for smooth, jitter-free scrolling
 
 /// GPU-accelerated renderer using wgpu/Metal
 pub struct Renderer<'a> {
@@ -79,8 +37,7 @@ pub struct Renderer<'a> {
     text_rasterizer: TextRasterizer,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    scroll_offset: usize,
-    scroll_animation: ScrollAnimation,
+    scroll_offset: f32,  // Fractional scroll position for smooth scrolling
     cursor_state: CursorState,
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
@@ -155,8 +112,7 @@ impl<'a> Renderer<'a> {
             text_rasterizer,
             render_pipeline,
             vertex_buffer,
-            scroll_offset: 0,
-            scroll_animation: ScrollAnimation::new(),
+            scroll_offset: 0.0,
             cursor_state,
             cursor_pipeline,
             color_palette,
@@ -164,38 +120,22 @@ impl<'a> Renderer<'a> {
         })
     }
 
-    /// Scroll viewport by delta lines (with smooth animation)
+    /// Scroll viewport by fractional delta (direct, smooth scrolling)
     /// Positive delta = scroll up (into history), Negative delta = scroll down (toward present)
-    /// 
-    /// Note: The actual bounds checking happens in render_to_buffer() where we have access
-    /// to the terminal's history_size(). This allows us to clamp to the available scrollback.
-    /// Using saturating arithmetic here prevents overflow but the real limit is enforced at render time.
-    pub fn scroll(&mut self, delta: i32) {
-        let new_target = if delta > 0 {
-            // Scroll up into history
-            self.scroll_animation.target.saturating_add(delta as usize)
-        } else if delta < 0 {
-            // Scroll down toward present (offset 0 = live view)
-            self.scroll_animation.target.saturating_sub((-delta) as usize)
-        } else {
-            self.scroll_animation.target
-        };
-        
-        self.scroll_animation.set_target(new_target);
-        log::debug!("Scroll target set to: {}", new_target);
+    pub fn scroll(&mut self, delta: f32) {
+        // Directly apply the delta for smooth scrolling
+        self.scroll_offset = (self.scroll_offset + delta).max(0.0);
+        // Bounds checking happens in render() where we clamp to history_size
     }
 
-    /// Reset scroll to bottom (live view) with smooth animation
+    /// Reset scroll to bottom (live view)
     pub fn reset_scroll(&mut self) {
-        self.scroll_animation.set_target(0);
-        log::debug!("Reset scroll to bottom (animating)");
+        self.scroll_offset = 0.0;
+        log::debug!("Reset scroll to bottom");
     }
 
     /// Render a frame with terminal content
     pub fn render<T>(&mut self, term: Option<Arc<Mutex<Term<T>>>>) -> Result<()> {
-        // Update smooth scroll animation (assuming 60fps = ~16ms)
-        self.scroll_offset = self.scroll_animation.update(0.016);
-        
         // Update cursor blink state
         let blink_changed = self.cursor_state.update_blink();
 
@@ -204,6 +144,11 @@ impl<'a> Renderer<'a> {
             log::debug!("Attempting to lock terminal for rendering");
             if let Some(term_lock) = term_arc.try_lock() {
                 log::debug!("Terminal locked, rendering to texture");
+                
+                // Clamp scroll offset to available history
+                let history_size = term_lock.grid().history_size();
+                self.scroll_offset = self.scroll_offset.min(history_size as f32);
+                
                 self.render_terminal_to_texture(&term_lock)?;
                 
                 // Update cursor position
@@ -232,7 +177,7 @@ impl<'a> Renderer<'a> {
         // SHOW_CURSOR flag present = visible, absent = hidden
         // Also hide cursor when scrolled in history
         let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR) 
-                          || self.scroll_offset > 0;
+                          || self.scroll_offset > 0.01;
         
         log::debug!("Cursor: pos=({}, {}), SHOW_CURSOR={}, hide={}", 
                    cursor_pos.column.0, cursor_pos.line.0, 
@@ -252,7 +197,7 @@ impl<'a> Renderer<'a> {
             cell_height,
             self.config.width,
             self.config.height,
-            self.scroll_offset,
+            self.scroll_offset.round() as usize,  // Convert to usize for cursor position
             hide_cursor,
         );
         
@@ -337,7 +282,7 @@ impl<'a> Renderer<'a> {
             &self.font_manager,
             self.config.width,
             self.config.height,
-            self.scroll_offset,
+            self.scroll_offset.round() as usize,  // Convert to usize for grid access
             self.config.format,
             &self.color_palette,
         )?;
@@ -391,7 +336,7 @@ impl<'a> Renderer<'a> {
 
     /// Get current scroll offset
     pub fn scroll_offset(&self) -> usize {
-        self.scroll_offset
+        self.scroll_offset.round() as usize
     }
 
     /// Update selection rendering

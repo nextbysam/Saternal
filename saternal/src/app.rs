@@ -82,7 +82,8 @@ impl<'a> App<'a> {
 
 
 
-        // Create tab manager
+        // Calculate initial terminal size from window (will be properly sized after renderer is ready)
+        // Using default 80x24 for now, will resize after window is shown
         let tab_manager = TabManager::new(config.terminal.shell.clone())?;
         let tab_manager = Arc::new(Mutex::new(tab_manager));
 
@@ -168,6 +169,15 @@ impl<'a> App<'a> {
             mouse_state,
         })
     }
+    
+    /// Calculate terminal dimensions from window size
+    /// Returns (cols, rows) with padding at bottom to prevent text cutoff
+    fn calculate_terminal_size(window_width: u32, window_height: u32, cell_width: f32, cell_height: f32) -> (usize, usize) {
+        let cols = ((window_width as f32) / cell_width).floor() as usize;
+        // Reserve ~1 row of padding at bottom to prevent descenders from being cut off
+        let rows = (((window_height as f32) / cell_height).floor() - 1.0).max(24.0) as usize;
+        (cols.max(80), rows)
+    }
 
     /// Run the application event loop
     pub fn run(self) -> Result<()> {
@@ -185,6 +195,9 @@ impl<'a> App<'a> {
         let mut clipboard = self.clipboard;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
+        
+        // Track if initial terminal sizing has been done
+        let mut initial_resize_done = false;
 
         info!("Starting event loop");
 
@@ -217,6 +230,29 @@ impl<'a> App<'a> {
                     debug!("Window resized: {:?}", size);
                     let mut renderer = renderer.lock();
                     renderer.resize(size.width, size.height);
+                    
+                    // Calculate new terminal dimensions based on font metrics
+                    let font_mgr = renderer.font_manager();
+                    let effective_size = font_mgr.effective_font_size();
+                    let line_metrics = font_mgr.font().horizontal_line_metrics(effective_size).unwrap();
+                    let cell_width = font_mgr.font().metrics('M', effective_size).advance_width;
+                    let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+                    
+                    let (cols, rows) = Self::calculate_terminal_size(size.width, size.height, cell_width, cell_height);
+                    debug!("Resizing terminal to {}x{} ({}x{} window, {}x{} cells)", 
+                           cols, rows, size.width, size.height, cell_width, cell_height);
+                    drop(renderer);
+                    
+                    // Resize all terminals in all tabs
+                    if let Some(mut tab_mgr) = tab_manager.try_lock() {
+                        if let Some(active_tab) = tab_mgr.active_tab_mut() {
+                            if let Err(e) = active_tab.resize(cols, rows) {
+                                log::error!("Failed to resize terminal: {}", e);
+                            }
+                        }
+                    }
+                    
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -566,26 +602,51 @@ impl<'a> App<'a> {
                     event: WindowEvent::MouseWheel { delta, .. },
                     ..
                 } => {
-                    // Convert scroll delta to lines
-                    let scroll_lines = match delta {
+                    // Convert scroll delta to fractional lines for smooth scrolling
+                    let scroll_delta = match delta {
                         MouseScrollDelta::LineDelta(_x, y) => {
                             // Mouse wheel: y > 0 = scroll up, y < 0 = scroll down
                             // Multiply by 3 for comfortable scrolling speed (3 lines per notch)
-                            (y * 3.0) as i32
+                            y * 3.0
                         }
                         MouseScrollDelta::PixelDelta(pos) => {
-                            // Trackpad: convert pixels to lines
-                            // Divide by approximate cell height (20px)
-                            (pos.y / 20.0) as i32
+                            // Trackpad: convert pixels to lines using typical cell height
+                            // Average terminal cell height is ~18-20px
+                            (pos.y / 18.0) as f32
                         }
                     };
 
-                    if scroll_lines != 0 {
-                        renderer.lock().scroll(scroll_lines);
+                    if scroll_delta.abs() > 0.001 {
+                        renderer.lock().scroll(scroll_delta);
+                        window.request_redraw();
                     }
                 }
 
                 Event::AboutToWait => {
+                    // Perform initial terminal sizing on first frame
+                    if !initial_resize_done {
+                        let window_size = window.inner_size();
+                        let mut renderer_locked = renderer.lock();
+                        let font_mgr = renderer_locked.font_manager();
+                        let effective_size = font_mgr.effective_font_size();
+                        let line_metrics = font_mgr.font().horizontal_line_metrics(effective_size).unwrap();
+                        let cell_width = font_mgr.font().metrics('M', effective_size).advance_width;
+                        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+                        drop(renderer_locked);
+                        
+                        let (cols, rows) = Self::calculate_terminal_size(window_size.width, window_size.height, cell_width, cell_height);
+                        info!("Initial terminal resize to {}x{} based on window {}x{}", cols, rows, window_size.width, window_size.height);
+                        
+                        if let Some(mut tab_mgr) = tab_manager.try_lock() {
+                            if let Some(active_tab) = tab_mgr.active_tab_mut() {
+                                if let Err(e) = active_tab.resize(cols, rows) {
+                                    log::error!("Failed to resize terminal initially: {}", e);
+                                }
+                            }
+                        }
+                        initial_resize_done = true;
+                    }
+                    
                     // Process terminal output
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {

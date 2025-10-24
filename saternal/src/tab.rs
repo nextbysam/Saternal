@@ -12,10 +12,14 @@ pub struct Tab {
 
 impl Tab {
     pub fn new(id: usize, shell: Option<String>) -> Result<Self> {
-        info!("Creating new tab: {}", id);
+        Self::new_with_size(id, 80, 24, shell)
+    }
+    
+    pub fn new_with_size(id: usize, cols: usize, rows: usize, shell: Option<String>) -> Result<Self> {
+        info!("Creating new tab: {} with size {}x{}", id, cols, rows);
 
         // Start with a single pane
-        let pane_tree = PaneNode::new_leaf(0, 80, 24, shell)?;
+        let pane_tree = PaneNode::new_leaf(0, cols, rows, shell)?;
 
         Ok(Self {
             id,
