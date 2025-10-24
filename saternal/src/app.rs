@@ -5,11 +5,14 @@ use cocoa::base::id;
 use log::{debug, info};
 use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
-use saternal_core::{Config, Renderer, key_to_bytes, InputModifiers, is_jump_to_bottom};
+use saternal_core::{
+    Clipboard, Config, MouseButton, MouseState, Renderer, SearchState, SelectionManager, 
+    SelectionMode, key_to_bytes, InputModifiers, is_jump_to_bottom, pixel_to_grid,
+};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
-    event::{Event, WindowEvent, ElementState, Modifiers, MouseScrollDelta},
+    event::{Event, WindowEvent, ElementState, Modifiers, MouseScrollDelta, MouseButton as WinitMouseButton},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{PhysicalKey, KeyCode, Key},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -26,6 +29,11 @@ pub struct App<'a> {
     dropdown: Arc<Mutex<DropdownWindow>>,
     hotkey_manager: Arc<HotkeyManager>,
     font_size: f32,  // Current font size (dynamically adjustable)
+    // Phase 2: User interaction features
+    selection_manager: SelectionManager,
+    clipboard: Clipboard,
+    search_state: SearchState,
+    mouse_state: MouseState,
 }
 
 // SAFETY: The App struct is self-referential - renderer borrows from window.
@@ -132,6 +140,12 @@ impl<'a> App<'a> {
 
         let font_size = config.appearance.font_size;
 
+        // Initialize Phase 2 features
+        let selection_manager = SelectionManager::new();
+        let clipboard = Clipboard::new()?;
+        let search_state = SearchState::new();
+        let mouse_state = MouseState::new();
+
         Ok(Self {
             config,
             event_loop,
@@ -141,6 +155,10 @@ impl<'a> App<'a> {
             dropdown,
             hotkey_manager,
             font_size,
+            selection_manager,
+            clipboard,
+            search_state,
+            mouse_state,
         })
     }
 
@@ -154,6 +172,12 @@ impl<'a> App<'a> {
         let mut font_size = self.font_size;
         let mut config = self.config.clone();
         let mut modifiers_state = Modifiers::default();  // Track modifier keys state
+        
+        // Phase 2 features
+        let mut selection_manager = self.selection_manager;
+        let mut clipboard = self.clipboard;
+        let mut search_state = self.search_state;
+        let mut mouse_state = self.mouse_state;
 
         info!("Starting event loop");
 
@@ -195,6 +219,97 @@ impl<'a> App<'a> {
                     // Only handle key presses, not releases
                     if event.state == ElementState::Pressed {
                         let cmd = modifiers_state.state().super_key();  // Cmd on macOS
+                        let shift = modifiers_state.state().shift_key();
+
+                        // Phase 2: Handle Cmd+[key] shortcuts for user interaction
+                        if cmd {
+                            if let PhysicalKey::Code(keycode) = event.physical_key {
+                                match keycode {
+                                    KeyCode::KeyC => {
+                                        // Cmd+C: Copy selection to clipboard
+                                        if let Some(tab_mgr) = tab_manager.try_lock() {
+                                            if let Some(pane) = tab_mgr.active_tab()
+                                                .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                            {
+                                                if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                                    if let Some(text) = selection_manager.get_text(&term_lock.grid()) {
+                                                        if let Err(e) = clipboard.set_text(&text) {
+                                                            log::error!("Failed to copy to clipboard: {}", e);
+                                                        } else {
+                                                            info!("Copied {} chars to clipboard", text.len());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        return;
+                                    }
+                                    KeyCode::KeyV => {
+                                        // Cmd+V: Paste from clipboard
+                                        if let Ok(text) = clipboard.get_text() {
+                                            info!("Pasting {} chars from clipboard", text.len());
+                                            let bytes = if saternal_core::clipboard::should_bracket_paste(&text) {
+                                                saternal_core::clipboard::bracket_paste(&text)
+                                            } else {
+                                                text.into_bytes()
+                                            };
+                                            
+                                            if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                                let _ = active_tab.write_input(&bytes);
+                                            }
+                                        }
+                                        return;
+                                    }
+                                    KeyCode::KeyF => {
+                                        // Cmd+F: Activate search
+                                        info!("Search activated (Cmd+F)");
+                                        search_state.activate();
+                                        // TODO: Show search UI overlay
+                                        return;
+                                    }
+                                    KeyCode::KeyG => {
+                                        // Cmd+G / Cmd+Shift+G: Find next/prev
+                                        if search_state.is_active() {
+                                            if let Some(tab_mgr) = tab_manager.try_lock() {
+                                                if let Some(pane) = tab_mgr.active_tab()
+                                                    .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                                {
+                                                    if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                                        let result = if shift {
+                                                            search_state.prev_match(&term_lock.grid())
+                                                        } else {
+                                                            search_state.next_match(&term_lock.grid())
+                                                        };
+                                                        
+                                                        if let Some(match_point) = result {
+                                                            info!("Found match at {:?}", match_point);
+                                                            // TODO: Scroll to match
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        return;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        // Handle Escape key
+                        if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Escape)) {
+                            if search_state.is_active() {
+                                search_state.deactivate();
+                                info!("Search deactivated");
+                                return;
+                            }
+                            if selection_manager.range().is_some() {
+                                selection_manager.clear();
+                                renderer.lock().update_selection(None);
+                                info!("Selection cleared");
+                                return;
+                            }
+                        }
 
                         // Handle Cmd+[key] hotkeys for font size adjustment (macOS-specific UI)
                         if cmd {
@@ -302,6 +417,101 @@ impl<'a> App<'a> {
                                     let _ = active_tab.write_input(text.as_bytes());
                                 }
                             }
+                        }
+                    }
+                }
+
+                Event::WindowEvent {
+                    event: WindowEvent::MouseInput { state, button, .. },
+                    ..
+                } => {
+                    // Phase 2: Mouse selection
+                    let mouse_button = match button {
+                        WinitMouseButton::Left => MouseButton::Left,
+                        WinitMouseButton::Right => MouseButton::Right,
+                        WinitMouseButton::Middle => MouseButton::Middle,
+                        _ => return,
+                    };
+
+                    match state {
+                        ElementState::Pressed => {
+                            mouse_state.press_button(mouse_button);
+                            
+                            // Start selection on left click
+                            if mouse_button == MouseButton::Left {
+                                let mode = match mouse_state.click_count {
+                                    1 => SelectionMode::Normal,
+                                    2 => SelectionMode::Word,
+                                    3 => SelectionMode::Line,
+                                    _ => SelectionMode::Normal,
+                                };
+                                
+                                if mouse_state.click_count == 1 {
+                                    selection_manager.start(mouse_state.position, mode);
+                                } else if mouse_state.click_count == 2 {
+                                    // Double-click: word selection
+                                    if let Some(tab_mgr) = tab_manager.try_lock() {
+                                        if let Some(pane) = tab_mgr.active_tab()
+                                            .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                        {
+                                            if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                                selection_manager.expand_word(&term_lock.grid(), mouse_state.position);
+                                                renderer.lock().update_selection(selection_manager.range());
+                                            }
+                                        }
+                                    }
+                                } else if mouse_state.click_count == 3 {
+                                    // Triple-click: line selection
+                                    if let Some(tab_mgr) = tab_manager.try_lock() {
+                                        if let Some(pane) = tab_mgr.active_tab()
+                                            .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                        {
+                                            if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                                selection_manager.expand_line(&term_lock.grid(), mouse_state.position);
+                                                renderer.lock().update_selection(selection_manager.range());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ElementState::Released => {
+                            // Finalize selection on release
+                            if mouse_button == MouseButton::Left && selection_manager.is_active() {
+                                if let Some(tab_mgr) = tab_manager.try_lock() {
+                                    if let Some(pane) = tab_mgr.active_tab()
+                                        .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                    {
+                                        if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                            let _ = selection_manager.finalize(&term_lock.grid());
+                                        }
+                                    }
+                                }
+                            }
+                            mouse_state.release_button();
+                        }
+                    }
+                }
+
+                Event::WindowEvent {
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
+                } => {
+                    // Phase 2: Update mouse position and selection
+                    // Get cell dimensions from renderer
+                    if let Some(renderer_lock) = renderer.try_lock() {
+                        let fm = renderer_lock.font_manager();
+                        let line_metrics = fm.font().horizontal_line_metrics(fm.font_size()).unwrap();
+                        let cell_width = fm.font().metrics('M', fm.font_size()).advance_width;
+                        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+                        
+                        mouse_state.update_position(position.x as f32, position.y as f32, cell_width, cell_height);
+                        
+                        // Update selection if dragging
+                        if mouse_state.is_dragging() && selection_manager.is_active() {
+                            selection_manager.update(mouse_state.position);
+                            drop(renderer_lock);  // Drop before calling update_selection
+                            renderer.lock().update_selection(selection_manager.range());
                         }
                     }
                 }
