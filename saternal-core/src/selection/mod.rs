@@ -65,19 +65,33 @@ impl SelectionManager {
         let (start, end) = range.normalized();
         
         let mut text = String::new();
+        let max_col = grid.columns().saturating_sub(1);
+        let max_line = (grid.screen_lines() as i32).saturating_sub(1);
         
-        for line in start.line.0..=end.line.0 {
-            let line_start = if line == start.line.0 { start.column.0 } else { 0 };
-            let line_end = if line == end.line.0 { end.column.0 } else { grid.columns() - 1 };
+        // Clamp line indices to valid range
+        let start_line = start.line.0.max(0).min(max_line);
+        let end_line = end.line.0.max(0).min(max_line);
+        
+        for line in start_line..=end_line {
+            let line_start = if line == start_line { 
+                start.column.0.min(max_col) 
+            } else { 
+                0 
+            };
+            let line_end = if line == end_line { 
+                end.column.0.min(max_col) 
+            } else { 
+                max_col 
+            };
             
             for col in line_start..=line_end {
-                let point = Point::new(alacritty_terminal::index::Line(line as i32), alacritty_terminal::index::Column(col));
+                let point = Point::new(alacritty_terminal::index::Line(line), alacritty_terminal::index::Column(col));
                 let cell = &grid[point];
                 text.push(cell.c);
             }
             
             // Add newline between lines (except for last line)
-            if line < end.line.0 {
+            if line < end_line {
                 text.push('\n');
             }
         }

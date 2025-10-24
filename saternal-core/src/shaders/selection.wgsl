@@ -6,10 +6,10 @@ struct SelectionSpan {
 }
 
 struct SelectionUniform {
-    spans: array<SelectionSpan, 64>,  // Support up to 64 highlight spans
-    count: u32,                         // Number of active spans
-    color: vec4<f32>,                   // RGBA highlight color
-    _padding: vec3<u32>,                // Alignment
+    spans: array<SelectionSpan, 64>,  // Support up to 64 highlight spans (1024 bytes)
+    count: u32,                         // Number of active spans (4 bytes)
+    _padding1: vec3<u32>,               // Padding to align color to 16-byte boundary (12 bytes)
+    color: vec4<f32>,                   // RGBA highlight color (16 bytes)
 }
 
 @group(0) @binding(0)

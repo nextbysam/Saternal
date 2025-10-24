@@ -392,7 +392,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// Update selection rendering
-    pub fn update_selection(&mut self, range: Option<SelectionRange>) {
+    pub fn update_selection(&mut self, range: Option<SelectionRange>, grid_cols: usize, grid_lines: usize) {
         let line_metrics = self.font_manager.font()
             .horizontal_line_metrics(self.font_manager.font_size())
             .unwrap();
@@ -407,7 +407,8 @@ impl<'a> Renderer<'a> {
             cell_height,
             self.config.width,
             self.config.height,
-            80,  // TODO: Get actual grid columns from terminal
+            grid_cols,
+            grid_lines,
         );
     }
 

@@ -20,10 +20,10 @@ unsafe impl bytemuck::Zeroable for SelectionSpan {}
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct SelectionUniforms {
-    spans: [SelectionSpan; 64],  // Up to 64 spans
-    count: u32,
-    color: [f32; 4],
-    _padding: [u32; 3],
+    spans: [SelectionSpan; 64],  // Up to 64 spans (1024 bytes)
+    count: u32,                   // 4 bytes
+    _padding1: [u32; 7],          // 28 bytes padding to match std140 layout (vec3<u32> alignment + vec4<f32> alignment)
+    color: [f32; 4],              // 16 bytes (vec4<f32>)
 }
 
 unsafe impl bytemuck::Pod for SelectionUniforms {}
@@ -58,8 +58,8 @@ impl SelectionRenderer {
         let initial_uniforms = SelectionUniforms {
             spans: [SelectionSpan { position: [0.0, 0.0], size: [0.0, 0.0] }; 64],
             count: 0,
+            _padding1: [0, 0, 0, 0, 0, 0, 0],
             color: [0.3, 0.5, 0.8, 0.3],  // Semi-transparent blue
-            _padding: [0, 0, 0],
         };
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -98,9 +98,10 @@ impl SelectionRenderer {
         window_width: u32,
         window_height: u32,
         grid_cols: usize,
+        grid_lines: usize,
     ) {
         if let Some(range) = range {
-            let spans = self.range_to_spans(range, cell_width, cell_height, window_width, window_height, grid_cols);
+            let spans = self.range_to_spans(range, cell_width, cell_height, window_width, window_height, grid_cols, grid_lines);
             self.current_uniforms.count = spans.len() as u32;
             for (i, span) in spans.iter().enumerate() {
                 if i < 64 {
@@ -155,16 +156,26 @@ impl SelectionRenderer {
         window_width: u32,
         window_height: u32,
         grid_cols: usize,
+        grid_lines: usize,
     ) -> Vec<SelectionSpan> {
         let (start, end) = range.normalized();
         let mut spans = Vec::new();
+        
+        // Clamp to grid bounds
+        let max_col = grid_cols.saturating_sub(1);
+        let max_line = (grid_lines as i32).saturating_sub(1);
+        let start_col = start.column.0.min(max_col);
+        let end_col = end.column.0.min(max_col);
+        let start_line = start.line.0.max(0).min(max_line);
+        let end_line = end.line.0.max(0).min(max_line);
 
-        if start.line == end.line {
+        if start_line == end_line {
             // Single line selection
+            let width = end_col.saturating_sub(start_col) + 1;
             let span = self.create_span(
-                start.line.0 as usize,
-                start.column.0,
-                end.column.0 - start.column.0 + 1,
+                start_line as usize,
+                start_col,
+                width,
                 cell_width,
                 cell_height,
                 window_width,
@@ -174,10 +185,11 @@ impl SelectionRenderer {
         } else {
             // Multi-line selection
             // First line (from start to end of line)
+            let first_width = grid_cols.saturating_sub(start_col);
             let first_span = self.create_span(
-                start.line.0 as usize,
-                start.column.0,
-                grid_cols - start.column.0,
+                start_line as usize,
+                start_col,
+                first_width,
                 cell_width,
                 cell_height,
                 window_width,
@@ -186,7 +198,7 @@ impl SelectionRenderer {
             spans.push(first_span);
 
             // Middle lines (full width)
-            for line in (start.line.0 + 1)..end.line.0 {
+            for line in (start_line + 1)..end_line {
                 let span = self.create_span(
                     line as usize,
                     0,
@@ -200,10 +212,11 @@ impl SelectionRenderer {
             }
 
             // Last line (from start of line to end)
+            let last_width = (end_col + 1).min(grid_cols);
             let last_span = self.create_span(
-                end.line.0 as usize,
+                end_line as usize,
                 0,
-                end.column.0 + 1,
+                last_width,
                 cell_width,
                 cell_height,
                 window_width,

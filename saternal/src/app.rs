@@ -305,7 +305,7 @@ impl<'a> App<'a> {
                             }
                             if selection_manager.range().is_some() {
                                 selection_manager.clear();
-                                renderer.lock().update_selection(None);
+                                renderer.lock().update_selection(None, 80, 24);
                                 info!("Selection cleared");
                                 return;
                             }
@@ -455,8 +455,12 @@ impl<'a> App<'a> {
                                             .and_then(|tab| tab.pane_tree.focused_pane()) 
                                         {
                                             if let Some(term_lock) = pane.terminal.term().try_lock() {
-                                                selection_manager.expand_word(&term_lock.grid(), mouse_state.position);
-                                                renderer.lock().update_selection(selection_manager.range());
+                                                let grid = term_lock.grid();
+                                                let grid_cols = grid.columns();
+                                                let grid_lines = grid.screen_lines();
+                                                selection_manager.expand_word(grid, mouse_state.position);
+                                                drop(term_lock);
+                                                renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
                                             }
                                         }
                                     }
@@ -467,8 +471,12 @@ impl<'a> App<'a> {
                                             .and_then(|tab| tab.pane_tree.focused_pane()) 
                                         {
                                             if let Some(term_lock) = pane.terminal.term().try_lock() {
-                                                selection_manager.expand_line(&term_lock.grid(), mouse_state.position);
-                                                renderer.lock().update_selection(selection_manager.range());
+                                                let grid = term_lock.grid();
+                                                let grid_cols = grid.columns();
+                                                let grid_lines = grid.screen_lines();
+                                                selection_manager.expand_line(grid, mouse_state.position);
+                                                drop(term_lock);
+                                                renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
                                             }
                                         }
                                     }
@@ -511,7 +519,26 @@ impl<'a> App<'a> {
                         if mouse_state.is_dragging() && selection_manager.is_active() {
                             selection_manager.update(mouse_state.position);
                             drop(renderer_lock);  // Drop before calling update_selection
-                            renderer.lock().update_selection(selection_manager.range());
+                            
+                            // Get grid dimensions from terminal
+                            let (grid_cols, grid_lines) = if let Some(tab_mgr) = tab_manager.try_lock() {
+                                if let Some(pane) = tab_mgr.active_tab()
+                                    .and_then(|tab| tab.pane_tree.focused_pane()) 
+                                {
+                                    if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                        let grid = term_lock.grid();
+                                        (grid.columns(), grid.screen_lines())
+                                    } else {
+                                        (80, 24)
+                                    }
+                                } else {
+                                    (80, 24)
+                                }
+                            } else {
+                                (80, 24)
+                            };
+                            
+                            renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
                         }
                     }
                 }
