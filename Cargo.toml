@@ -53,6 +53,10 @@ parking_lot = "0.12"
 bitflags = "2.4"
 bytemuck = { version = "1.14", features = ["derive"] }
 
+# Phase 2 dependencies
+arboard = "3.3"  # Clipboard support
+regex = "1.10"   # Smart selection patterns
+
 [profile.release]
 opt-level = 3
 lto = true

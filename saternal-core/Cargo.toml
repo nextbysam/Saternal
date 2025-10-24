@@ -31,3 +31,7 @@ bitflags.workspace = true
 serde.workspace = true
 toml.workspace = true
 bytemuck.workspace = true
+
+# Phase 2 features
+arboard.workspace = true
+regex.workspace = true
