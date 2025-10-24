@@ -21,6 +21,7 @@ use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
+use crate::selection::{SelectionRange, SelectionRenderer};
 
 /// Smooth scroll animation using spring physics
 struct ScrollAnimation {
@@ -83,6 +84,7 @@ pub struct Renderer<'a> {
     cursor_state: CursorState,
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
+    selection_renderer: SelectionRenderer,
 }
 
 impl<'a> Renderer<'a> {
@@ -137,6 +139,9 @@ impl<'a> Renderer<'a> {
             gpu.config.format,
         );
 
+        // Create selection renderer
+        let selection_renderer = SelectionRenderer::new(&gpu.device, gpu.config.format);
+
         Ok(Self {
             device: gpu.device,
             queue: gpu.queue,
@@ -152,6 +157,7 @@ impl<'a> Renderer<'a> {
             cursor_state,
             cursor_pipeline,
             color_palette,
+            selection_renderer,
         })
     }
 
@@ -294,6 +300,16 @@ impl<'a> Renderer<'a> {
             log::trace!("Drawing 6 vertices for fullscreen quad");
             render_pass.draw(0..6, 0..1);
             
+            // Draw selection highlights
+            if self.selection_renderer.has_selection() {
+                log::trace!("Drawing selection highlights");
+                self.selection_renderer.upload_uniforms(&self.queue);
+                render_pass.set_pipeline(self.selection_renderer.pipeline());
+                render_pass.set_bind_group(0, self.selection_renderer.bind_group(), &[]);
+                let instance_count = self.selection_renderer.instance_count();
+                render_pass.draw(0..6, 0..instance_count);
+            }
+            
             // Draw cursor overlay
             if self.cursor_state.is_visible() {
                 log::trace!("Drawing cursor overlay");
@@ -373,6 +389,26 @@ impl<'a> Renderer<'a> {
     /// Get current scroll offset
     pub fn scroll_offset(&self) -> usize {
         self.scroll_offset
+    }
+
+    /// Update selection rendering
+    pub fn update_selection(&mut self, range: Option<SelectionRange>) {
+        let line_metrics = self.font_manager.font()
+            .horizontal_line_metrics(self.font_manager.font_size())
+            .unwrap();
+        let cell_width = self.font_manager.font()
+            .metrics('M', self.font_manager.font_size())
+            .advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+        self.selection_renderer.update(
+            range,
+            cell_width,
+            cell_height,
+            self.config.width,
+            self.config.height,
+            80,  // TODO: Get actual grid columns from terminal
+        );
     }
 
     /// Update font size and recalculate cell dimensions

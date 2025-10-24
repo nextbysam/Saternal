@@ -3,7 +3,75 @@
 /// Implements VT100/xterm-compatible key sequences for terminal emulation.
 /// Reference: TERMINAL_INPUT_REFERENCE.md
 
+use alacritty_terminal::index::{Column, Line, Point};
 use winit::keyboard::{KeyCode, Key, ModifiersState};
+
+/// Mouse button identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+/// Mouse state for selection tracking
+#[derive(Debug, Clone)]
+pub struct MouseState {
+    pub position: Point,
+    pub button_pressed: Option<MouseButton>,
+    pub drag_start: Option<Point>,
+    pub click_count: u8,  // For double/triple click detection
+    pub last_click_time: std::time::Instant,
+}
+
+impl MouseState {
+    pub fn new() -> Self {
+        Self {
+            position: Point::new(Line(0), Column(0)),
+            button_pressed: None,
+            drag_start: None,
+            click_count: 0,
+            last_click_time: std::time::Instant::now(),
+        }
+    }
+
+    /// Update mouse position from pixel coordinates
+    pub fn update_position(&mut self, pixel_x: f32, pixel_y: f32, cell_width: f32, cell_height: f32) {
+        self.position = pixel_to_grid(pixel_x, pixel_y, cell_width, cell_height);
+    }
+
+    /// Handle mouse button press
+    pub fn press_button(&mut self, button: MouseButton) {
+        self.button_pressed = Some(button);
+        self.drag_start = Some(self.position);
+        
+        // Detect multiple clicks
+        let elapsed = self.last_click_time.elapsed();
+        if elapsed.as_millis() < 500 {
+            self.click_count = (self.click_count + 1).min(3);
+        } else {
+            self.click_count = 1;
+        }
+        self.last_click_time = std::time::Instant::now();
+    }
+
+    /// Handle mouse button release
+    pub fn release_button(&mut self) {
+        self.button_pressed = None;
+        self.drag_start = None;
+    }
+
+    /// Check if mouse is being dragged
+    pub fn is_dragging(&self) -> bool {
+        self.button_pressed.is_some() && self.drag_start.is_some()
+    }
+}
+
+impl Default for MouseState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Modifier key states for generating modified escape sequences
 #[derive(Debug, Clone, Copy)]
@@ -231,6 +299,13 @@ pub fn bracket_paste(text: &str) -> Vec<u8> {
     result.extend_from_slice(text.as_bytes());
     result.extend_from_slice(b"\x1b[201~"); // End paste
     result
+}
+
+/// Convert pixel coordinates to terminal grid position
+pub fn pixel_to_grid(pixel_x: f32, pixel_y: f32, cell_width: f32, cell_height: f32) -> Point {
+    let col = (pixel_x / cell_width).floor() as usize;
+    let line = (pixel_y / cell_height).floor() as usize;
+    Point::new(Line(line), Column(col))
 }
 
 #[cfg(test)]
