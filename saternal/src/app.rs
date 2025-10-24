@@ -80,24 +80,6 @@ impl<'a> App<'a> {
         }
         let dropdown = Arc::new(Mutex::new(dropdown));
 
-        // Setup global hotkey (before renderer)
-        let window_clone = window.clone();
-        let dropdown_clone = dropdown.clone();
-        let hotkey_manager = HotkeyManager::new(move || {
-            info!("Hotkey triggered!");
-            let dropdown = dropdown_clone.lock();
-            unsafe {
-                if let Ok(handle) = window_clone.window_handle() {
-                    if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
-                        let ns_view = appkit_handle.ns_view.as_ptr() as id;
-                        let ns_window: id = msg_send![ns_view, window];
-                        let _ = dropdown.toggle(ns_window);
-                    }
-                }
-            }
-        })?;
-        let hotkey_manager = Arc::new(hotkey_manager);
-
         // SAFETY: We're creating a self-referential structure here.
         // The renderer holds a reference to window with lifetime 'a.
         // This is safe because:
@@ -151,6 +133,42 @@ impl<'a> App<'a> {
         // Create tab manager with properly sized terminal from the start
         let tab_manager = TabManager::new_with_size(config.terminal.shell.clone(), initial_cols, initial_rows)?;
         let tab_manager = Arc::new(Mutex::new(tab_manager));
+
+        // Setup global hotkey
+        // Note: When window is repositioned to a different monitor, macOS automatically
+        // triggers WindowEvent::Resized and WindowEvent::ScaleFactorChanged, which will
+        // update the renderer and terminal dimensions. We just toggle visibility here.
+        let window_clone = window.clone();
+        let dropdown_clone = dropdown.clone();
+        let hotkey_manager = HotkeyManager::new(move || {
+            info!("Hotkey triggered!");
+            let mut dropdown = dropdown_clone.lock();
+            unsafe {
+                if let Ok(handle) = window_clone.window_handle() {
+                    if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
+                        let ns_view = appkit_handle.ns_view.as_ptr() as id;
+                        let ns_window: id = msg_send![ns_view, window];
+                        
+                        // Toggle window (repositions to active monitor if hidden)
+                        match dropdown.toggle(ns_window) {
+                            Ok(Some((width, height, scale_factor))) => {
+                                info!("Window repositioned: {}x{} at scale {:.2}x - waiting for OS resize events", 
+                                      width, height, scale_factor);
+                                // macOS will send Resized and ScaleFactorChanged events automatically
+                                window_clone.request_redraw();
+                            }
+                            Ok(None) => {
+                                window_clone.request_redraw();
+                            }
+                            Err(e) => {
+                                log::error!("Failed to toggle window: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        })?;
+        let hotkey_manager = Arc::new(hotkey_manager);
 
         let font_size = config.appearance.font_size;
 

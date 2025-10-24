@@ -186,7 +186,8 @@ impl DropdownWindow {
     }
 
     /// Toggle window visibility with animation
-    pub unsafe fn toggle(&self, ns_window: id) -> Result<()> {
+    /// Returns (width, height, scale_factor) if window was shown and repositioned
+    pub unsafe fn toggle(&self, ns_window: id) -> Result<Option<(u32, u32, f64)>> {
         let mut visible = self.visible.lock();
         let was_visible = *visible;
         *visible = !*visible;
@@ -194,19 +195,22 @@ impl DropdownWindow {
         if *visible {
             // Only reposition if window was hidden (transitioning hidden→visible)
             // Don't reposition if toggling while already visible
-            self.show_animated(ns_window, !was_visible)?;
+            let dims = self.show_animated(ns_window, !was_visible)?;
+            Ok(dims)
         } else {
             self.hide_animated(ns_window)?;
+            Ok(None)
         }
-
-        Ok(())
     }
 
     /// Show window with slide-down animation
     /// should_reposition: if true, move window to screen with mouse cursor
-    unsafe fn show_animated(&self, ns_window: id, should_reposition: bool) -> Result<()> {
+    /// Returns (width, height, scale_factor) if repositioned, None otherwise
+    unsafe fn show_animated(&self, ns_window: id, should_reposition: bool) -> Result<Option<(u32, u32, f64)>> {
         info!("Showing dropdown window (reposition: {})", should_reposition);
 
+        let mut new_dims = None;
+        
         // Only reposition if window was hidden (opening on active screen)
         // Don't reposition if window is already visible (just a toggle)
         if should_reposition {
@@ -225,6 +229,18 @@ impl DropdownWindow {
             );
             
             let () = msg_send![ns_window, setFrame:new_frame display:YES];
+            
+            // Get the new screen's scale factor
+            let backing_scale_factor: f64 = msg_send![screen, backingScaleFactor];
+            
+            info!("Window repositioned to screen with scale factor: {:.2}x, dimensions: {}x{}",
+                  backing_scale_factor, new_width as u32, current_frame.size.height as u32);
+            
+            new_dims = Some((
+                new_width as u32,
+                current_frame.size.height as u32,
+                backing_scale_factor,
+            ));
         }
 
         // Make window visible
@@ -241,7 +257,7 @@ impl DropdownWindow {
         let () = msg_send![ns_window, animator];
         let () = msg_send![ns_window, setAlphaValue:1.0f64];
 
-        Ok(())
+        Ok(new_dims)
     }
 
     /// Hide window with slide-up animation
