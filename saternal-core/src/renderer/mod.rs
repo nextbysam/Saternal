@@ -22,6 +22,51 @@ use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
 
+/// Smooth scroll animation using spring physics
+struct ScrollAnimation {
+    target: usize,
+    current: f32,
+    velocity: f32,
+}
+
+impl ScrollAnimation {
+    fn new() -> Self {
+        Self {
+            target: 0,
+            current: 0.0,
+            velocity: 0.0,
+        }
+    }
+    
+    fn update(&mut self, delta_time: f32) -> usize {
+        const SPRING: f32 = 0.3;
+        const DAMPING: f32 = 0.85;
+        
+        let diff = self.target as f32 - self.current;
+        self.velocity += diff * SPRING;
+        self.velocity *= DAMPING;
+        self.current += self.velocity * delta_time * 60.0; // Normalize to 60fps
+        
+        // Snap when close
+        if diff.abs() < 0.1 && self.velocity.abs() < 0.1 {
+            self.current = self.target as f32;
+            self.velocity = 0.0;
+        }
+        
+        self.current.round() as usize
+    }
+    
+    fn set_target(&mut self, target: usize) {
+        self.target = target;
+    }
+    
+    fn reset(&mut self) {
+        self.target = 0;
+        self.current = 0.0;
+        self.velocity = 0.0;
+    }
+}
+
 /// GPU-accelerated renderer using wgpu/Metal
 pub struct Renderer<'a> {
     device: wgpu::Device,
@@ -34,6 +79,7 @@ pub struct Renderer<'a> {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     scroll_offset: usize,
+    scroll_animation: ScrollAnimation,
     cursor_state: CursorState,
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
@@ -102,38 +148,45 @@ impl<'a> Renderer<'a> {
             render_pipeline,
             vertex_buffer,
             scroll_offset: 0,
+            scroll_animation: ScrollAnimation::new(),
             cursor_state,
             cursor_pipeline,
             color_palette,
         })
     }
 
-    /// Scroll viewport by delta lines
+    /// Scroll viewport by delta lines (with smooth animation)
     /// Positive delta = scroll up (into history), Negative delta = scroll down (toward present)
     /// 
     /// Note: The actual bounds checking happens in render_to_buffer() where we have access
     /// to the terminal's history_size(). This allows us to clamp to the available scrollback.
     /// Using saturating arithmetic here prevents overflow but the real limit is enforced at render time.
     pub fn scroll(&mut self, delta: i32) {
-        if delta > 0 {
+        let new_target = if delta > 0 {
             // Scroll up into history
-            self.scroll_offset = self.scroll_offset.saturating_add(delta as usize);
-            log::debug!("Scrolled up, offset now: {}", self.scroll_offset);
+            self.scroll_animation.target.saturating_add(delta as usize)
         } else if delta < 0 {
             // Scroll down toward present (offset 0 = live view)
-            self.scroll_offset = self.scroll_offset.saturating_sub((-delta) as usize);
-            log::debug!("Scrolled down, offset now: {}", self.scroll_offset);
-        }
+            self.scroll_animation.target.saturating_sub((-delta) as usize)
+        } else {
+            self.scroll_animation.target
+        };
+        
+        self.scroll_animation.set_target(new_target);
+        log::debug!("Scroll target set to: {}", new_target);
     }
 
-    /// Reset scroll to bottom (live view)
+    /// Reset scroll to bottom (live view) with smooth animation
     pub fn reset_scroll(&mut self) {
-        self.scroll_offset = 0;
-        log::debug!("Reset scroll to bottom");
+        self.scroll_animation.set_target(0);
+        log::debug!("Reset scroll to bottom (animating)");
     }
 
     /// Render a frame with terminal content
     pub fn render<T>(&mut self, term: Option<Arc<Mutex<Term<T>>>>) -> Result<()> {
+        // Update smooth scroll animation (assuming 60fps = ~16ms)
+        self.scroll_offset = self.scroll_animation.update(0.016);
+        
         // Update cursor blink state
         let blink_changed = self.cursor_state.update_blink();
 

@@ -40,6 +40,19 @@ impl InputModifiers {
     }
 }
 
+/// Check if key combination is "jump to bottom" (Shift+G or Shift+End)
+pub fn is_jump_to_bottom(key: &Key, physical_key: KeyCode, mods: InputModifiers) -> bool {
+    // Shift+G (vim-style)
+    if mods.shift && !mods.ctrl && !mods.alt && physical_key == KeyCode::KeyG {
+        return true;
+    }
+    // Shift+End (traditional)
+    if mods.shift && !mods.ctrl && !mods.alt && physical_key == KeyCode::End {
+        return true;
+    }
+    false
+}
+
 /// Convert a keyboard input to terminal bytes
 /// Returns Some(bytes) if the key produces terminal input, None otherwise
 pub fn key_to_bytes(

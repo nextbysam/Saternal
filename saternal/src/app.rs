@@ -4,7 +4,7 @@ use cocoa::base::id;
 use log::{debug, info};
 use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
-use saternal_core::{Config, Renderer, key_to_bytes, InputModifiers};
+use saternal_core::{Config, Renderer, key_to_bytes, InputModifiers, is_jump_to_bottom};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
 use winit::{
@@ -270,6 +270,16 @@ impl<'a> App<'a> {
                         // Convert modifiers to our InputModifiers type
                         let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
+                        // Check for jump to bottom shortcut (Shift+G or Shift+End)
+                        if let PhysicalKey::Code(keycode) = event.physical_key {
+                            if is_jump_to_bottom(&event.logical_key, keycode, input_mods) {
+                                info!("Jump to bottom triggered");
+                                renderer.lock().reset_scroll();
+                                window.request_redraw();
+                                return; // Don't send to terminal
+                            }
+                        }
+
                         // Try to convert key to terminal bytes using the input module
                         if let PhysicalKey::Code(keycode) = event.physical_key {
                             if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
@@ -340,14 +350,33 @@ impl<'a> App<'a> {
                 } => {
                     // Render the frame with terminal content
                     if let Some(mut renderer) = renderer.try_lock() {
-                        // Get the active terminal for rendering
-                        let term = if let Some(tab_mgr) = tab_manager.try_lock() {
-                            tab_mgr.active_tab()
-                                .and_then(|tab| tab.pane_tree.focused_pane())
-                                .map(|pane| pane.terminal.term())
+                        // Get the active terminal for rendering and history size
+                        let (term, history_size) = if let Some(tab_mgr) = tab_manager.try_lock() {
+                            if let Some(pane) = tab_mgr.active_tab()
+                                .and_then(|tab| tab.pane_tree.focused_pane()) 
+                            {
+                                let term_arc = pane.terminal.term();
+                                let history_size = if let Some(term_lock) = term_arc.try_lock() {
+                                    term_lock.grid().history_size()
+                                } else {
+                                    0
+                                };
+                                (Some(term_arc), history_size)
+                            } else {
+                                (None, 0)
+                            }
                         } else {
-                            None
+                            (None, 0)
                         };
+
+                        // Update window title based on scroll position
+                        let scroll_offset = renderer.scroll_offset();
+                        if scroll_offset > 0 && history_size > 0 {
+                            let percentage = (scroll_offset * 100) / history_size.max(1);
+                            window.set_title(&format!("Saternal [↑ {}%] - Press Shift+G to jump to bottom", percentage));
+                        } else {
+                            window.set_title("Saternal");
+                        }
                         
                         if let Err(e) = renderer.render(term) {
                             log::error!("Render error: {}", e);
