@@ -79,6 +79,7 @@ impl Default for Config {
                 opacity: 0.95,
                 blur: true,
                 cursor: CursorConfig::default(),
+                dpi_scale_override: None,
             },
             terminal: TerminalConfig {
                 shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),
