@@ -112,6 +112,7 @@ impl<'a> App<'a> {
             &config.appearance.font_family,
             config.appearance.font_size,
             config.appearance.cursor,
+            config.appearance.palette,
         )
         .await?;
         let renderer = Arc::new(Mutex::new(renderer));

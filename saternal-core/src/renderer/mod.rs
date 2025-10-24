@@ -4,6 +4,7 @@ mod gpu;
 mod pipeline;
 mod text_rasterizer;
 mod texture;
+pub mod theme;
 
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
@@ -19,6 +20,7 @@ use gpu::GpuContext;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
+pub use theme::ColorPalette;
 
 /// GPU-accelerated renderer using wgpu/Metal
 pub struct Renderer<'a> {
@@ -34,6 +36,7 @@ pub struct Renderer<'a> {
     scroll_offset: usize,
     cursor_state: CursorState,
     cursor_pipeline: wgpu::RenderPipeline,
+    color_palette: ColorPalette,
 }
 
 impl<'a> Renderer<'a> {
@@ -43,6 +46,7 @@ impl<'a> Renderer<'a> {
         font_family: &str,
         font_size: f32,
         cursor_config: CursorConfig,
+        color_palette: ColorPalette,
     ) -> Result<Self> {
         // Initialize GPU context
         let gpu = GpuContext::new(window).await?;
@@ -100,6 +104,7 @@ impl<'a> Renderer<'a> {
             scroll_offset: 0,
             cursor_state,
             cursor_pipeline,
+            color_palette,
         })
     }
 
@@ -163,7 +168,9 @@ impl<'a> Renderer<'a> {
         
         // Cursor visibility is managed by the terminal's DECTCEM mode (CSI ? 25 h/l)
         // SHOW_CURSOR flag present = visible, absent = hidden
-        let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR);
+        // Also hide cursor when scrolled in history
+        let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR) 
+                          || self.scroll_offset > 0;
         
         log::debug!("Cursor: pos=({}, {}), SHOW_CURSOR={}, hide={}", 
                    cursor_pos.column.0, cursor_pos.line.0, 
@@ -260,6 +267,7 @@ impl<'a> Renderer<'a> {
             self.config.height,
             self.scroll_offset,
             self.config.format,
+            &self.color_palette,
         )?;
 
         // Upload to GPU texture

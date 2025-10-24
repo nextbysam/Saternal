@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::renderer::cursor::CursorConfig;
+use crate::renderer::theme::ColorPalette;
 
 /// Configuration for Saternal
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,8 +31,9 @@ pub struct HotkeyConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppearanceConfig {
-    /// Theme name
-    pub theme: String,
+    /// Color palette for theming
+    #[serde(default)]
+    pub palette: ColorPalette,
     /// Font family
     pub font_family: String,
     /// Font size in points
@@ -67,7 +69,7 @@ impl Default for Config {
                 toggle: "cmd+`".to_string(),
             },
             appearance: AppearanceConfig {
-                theme: "tokyo-night".to_string(),
+                palette: ColorPalette::default(),
                 font_family: "JetBrains Mono".to_string(),
                 font_size: 14.0,
                 opacity: 0.95,

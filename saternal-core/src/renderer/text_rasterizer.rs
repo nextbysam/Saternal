@@ -5,7 +5,8 @@ use alacritty_terminal::term::Term;
 use anyhow::Result;
 use wgpu;
 
-use super::color::ansi_to_rgb;
+use super::color::ansi_to_rgb_with_palette;
+use super::theme::ColorPalette;
 
 /// Rasterizes terminal text to a pixel buffer for GPU upload
 pub(crate) struct TextRasterizer {
@@ -40,6 +41,7 @@ impl TextRasterizer {
         height: u32,
         scroll_offset: usize,
         surface_format: wgpu::TextureFormat,
+        palette: &ColorPalette,
     ) -> Result<Vec<u8>> {
         let rows = term.screen_lines();
         let cols = term.columns();
@@ -79,8 +81,8 @@ impl TextRasterizer {
                 }
                 char_count += 1;
 
-                // Get colors
-                let (fg_r, fg_g, fg_b) = ansi_to_rgb(&cell.fg);
+                // Get colors from palette
+                let (fg_r, fg_g, fg_b) = ansi_to_rgb_with_palette(&cell.fg, palette);
 
                 // Rasterize glyph
                 let (metrics, bitmap) = font_manager.rasterize(c);

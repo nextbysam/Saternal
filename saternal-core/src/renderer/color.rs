@@ -1,4 +1,5 @@
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor};
+use super::theme::ColorPalette;
 
 /// Convert ANSI terminal color to RGB tuple
 pub(crate) fn ansi_to_rgb(color: &AnsiColor) -> (u8, u8, u8) {
@@ -52,5 +53,52 @@ pub(crate) fn ansi_to_rgb(color: &AnsiColor) -> (u8, u8, u8) {
                 _ => (229, 229, 229), // Default to white
             }
         },
+    }
+}
+
+/// Convert ANSI terminal color to RGB using ColorPalette
+pub(crate) fn ansi_to_rgb_with_palette(color: &AnsiColor, palette: &ColorPalette) -> (u8, u8, u8) {
+    match color {
+        AnsiColor::Named(named) => {
+            let idx = match named {
+                NamedColor::Black => 0,
+                NamedColor::Red => 1,
+                NamedColor::Green => 2,
+                NamedColor::Yellow => 3,
+                NamedColor::Blue => 4,
+                NamedColor::Magenta => 5,
+                NamedColor::Cyan => 6,
+                NamedColor::White => 7,
+                NamedColor::BrightBlack => 8,
+                NamedColor::BrightRed => 9,
+                NamedColor::BrightGreen => 10,
+                NamedColor::BrightYellow => 11,
+                NamedColor::BrightBlue => 12,
+                NamedColor::BrightMagenta => 13,
+                NamedColor::BrightCyan => 14,
+                NamedColor::BrightWhite => 15,
+                NamedColor::Foreground => {
+                    let fg = palette.foreground;
+                    return ((fg[0] * 255.0) as u8, (fg[1] * 255.0) as u8, (fg[2] * 255.0) as u8);
+                }
+                _ => {
+                    let fg = palette.foreground;
+                    return ((fg[0] * 255.0) as u8, (fg[1] * 255.0) as u8, (fg[2] * 255.0) as u8);
+                }
+            };
+            let color = palette.get_ansi_color(idx);
+            ((color[0] * 255.0) as u8, (color[1] * 255.0) as u8, (color[2] * 255.0) as u8)
+        }
+        AnsiColor::Spec(rgb) => (rgb.r, rgb.g, rgb.b),
+        AnsiColor::Indexed(idx) => {
+            if *idx < 16 {
+                let color = palette.get_ansi_color(*idx);
+                ((color[0] * 255.0) as u8, (color[1] * 255.0) as u8, (color[2] * 255.0) as u8)
+            } else {
+                // For colors 16-255, use the spec or default to foreground
+                let fg = palette.foreground;
+                ((fg[0] * 255.0) as u8, (fg[1] * 255.0) as u8, (fg[2] * 255.0) as u8)
+            }
+        }
     }
 }
