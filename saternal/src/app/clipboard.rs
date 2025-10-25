@@ -32,7 +32,11 @@ pub(super) fn handle_copy(
 }
 
 /// Handle paste operation (Cmd+V)
-pub(super) fn handle_paste(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
+pub(super) fn handle_paste(
+    tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
+    renderer: &Arc<Mutex<saternal_core::Renderer>>,
+    window: &winit::window::Window,
+) {
     let mut clipboard = match Clipboard::new() {
         Ok(cb) => cb,
         Err(e) => {
@@ -52,5 +56,8 @@ pub(super) fn handle_paste(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
         if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
             let _ = active_tab.write_input(&bytes);
         }
+        // Auto-scroll to bottom when user pastes text
+        renderer.lock().reset_scroll();
+        window.request_redraw();
     }
 }

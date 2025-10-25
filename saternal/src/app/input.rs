@@ -124,7 +124,7 @@ fn handle_cmd_shortcuts(
                 return true;
             }
             KeyCode::KeyV => {
-                super::clipboard::handle_paste(tab_manager);
+                super::clipboard::handle_paste(tab_manager, renderer, window);
                 return true;
             }
             KeyCode::KeyF => {
@@ -299,6 +299,9 @@ fn handle_terminal_input(
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(&bytes);
             }
+            // Auto-scroll to bottom when user types input
+            renderer.lock().reset_scroll();
+            window.request_redraw();
             return true;
         }
     }
@@ -309,6 +312,9 @@ fn handle_terminal_input(
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(text.as_bytes());
             }
+            // Auto-scroll to bottom when user types input
+            renderer.lock().reset_scroll();
+            window.request_redraw();
         }
     }
 
