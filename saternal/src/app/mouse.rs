@@ -145,7 +145,7 @@ pub(super) fn handle_cursor_moved(
     }
 }
 
-fn get_grid_dimensions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) -> (usize, usize) {
+pub(super) fn get_grid_dimensions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) -> (usize, usize) {
     if let Some(tab_mgr) = tab_manager.try_lock() {
         if let Some(pane) = tab_mgr.active_tab().and_then(|tab| tab.pane_tree.focused_pane()) {
             if let Some(term_lock) = pane.terminal.term().try_lock() {

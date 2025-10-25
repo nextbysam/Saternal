@@ -33,7 +33,7 @@ pub(super) fn handle_keyboard_input(
 
     // Handle Escape key
     if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Escape)) {
-        return handle_escape(search_state, selection_manager, renderer);
+        return handle_escape(search_state, selection_manager, renderer, tab_manager);
     }
 
     // Handle Tab navigation
@@ -74,6 +74,7 @@ fn handle_escape(
     search_state: &mut SearchState,
     selection_manager: &mut SelectionManager,
     renderer: &Arc<Mutex<Renderer>>,
+    tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
 ) -> bool {
     if search_state.is_active() {
         search_state.deactivate();
@@ -82,7 +83,8 @@ fn handle_escape(
     }
     if selection_manager.range().is_some() {
         selection_manager.clear();
-        renderer.lock().update_selection(None, 80, 24);
+        let (grid_cols, grid_lines) = super::mouse::get_grid_dimensions(tab_manager);
+        renderer.lock().update_selection(None, grid_cols, grid_lines);
         info!("Selection cleared");
         return true;
     }
