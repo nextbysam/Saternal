@@ -1,7 +1,6 @@
 /// GPU-accelerated selection highlight rendering and pane border rendering
 use super::range::SelectionRange;
-use alacritty_terminal::grid::{Dimensions, Grid};
-use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::grid::Dimensions;
 use crate::pane::PaneNode;
 use wgpu;
 use wgpu::util::DeviceExt;
