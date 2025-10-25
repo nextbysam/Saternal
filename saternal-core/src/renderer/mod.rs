@@ -191,10 +191,13 @@ impl Renderer {
         let total_pixels = (self.config.width * self.config.height) as usize;
         let mut combined_buffer = vec![0u8; total_pixels * 4];
 
-        // Collect pane data for parallel rendering
+        // Collect pane data for parallel rendering (clone Arc<Mutex> to own it)
         let pane_data: Vec<_> = viewports.iter()
             .filter_map(|viewport| {
-                pane_tree.find_pane(viewport.pane_id).map(|pane| (pane, viewport))
+                pane_tree.find_pane(viewport.pane_id).map(|pane| {
+                    let term_arc = pane.terminal.term();  // Clone Arc for ownership
+                    (term_arc, viewport)
+                })
             })
             .collect();
 
@@ -206,39 +209,40 @@ impl Renderer {
         let scroll_offset = self.scroll_offset;
 
         // PARALLEL: Render all panes simultaneously on multiple CPU cores
-        let rendered_panes: Vec<_> = pane_data.par_iter()
-            .filter_map(|(pane, viewport)| {
+        // Returns (viewport, buffer) pairs for successful renders
+        let rendered_panes: Vec<(&PaneViewport, Vec<u8>)> = pane_data.par_iter()
+            .filter_map(|(term_arc, viewport)| {
                 // Try to lock terminal (non-blocking)
-                pane.terminal.term().try_lock().map(|term_lock| {
-                    log::debug!("Rendering pane {} to viewport ({}, {}) {}x{}", 
-                        viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height);
-                    
-                    // Clamp scroll offset to available history for focused pane
-                    let pane_scroll_offset = if viewport.focused {
-                        let history_size = term_lock.grid().history_size();
-                        scroll_offset.min(history_size as f32).round() as usize
-                    } else {
-                        0 // Non-focused panes show live view
-                    };
-                    
-                    // Render this pane's terminal to a viewport-sized buffer (CPU-bound work)
-                    let pane_buffer = text_rasterizer.render_to_buffer(
-                        &term_lock,
-                        font_manager,
-                        viewport.width,
-                        viewport.height,
-                        pane_scroll_offset,
-                        surface_format,
-                        color_palette,
-                    ).ok()?;
-                    
-                    Some((viewport, pane_buffer, term_lock))
-                }).flatten()
+                let term_lock = term_arc.try_lock()?;
+                
+                log::debug!("Rendering pane {} to viewport ({}, {}) {}x{}", 
+                    viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height);
+                
+                // Clamp scroll offset to available history for focused pane
+                let pane_scroll_offset = if viewport.focused {
+                    let history_size = term_lock.grid().history_size();
+                    scroll_offset.min(history_size as f32).round() as usize
+                } else {
+                    0 // Non-focused panes show live view
+                };
+                
+                // Render this pane's terminal to a viewport-sized buffer (CPU-bound work)
+                let pane_buffer = text_rasterizer.render_to_buffer(
+                    &term_lock,
+                    font_manager,
+                    viewport.width,
+                    viewport.height,
+                    pane_scroll_offset,
+                    surface_format,
+                    color_palette,
+                ).ok()?;
+                
+                Some((*viewport, pane_buffer))
             })
             .collect();
 
         // SEQUENTIAL: Copy buffers to combined buffer and update cursor
-        for (viewport, pane_buffer, term_lock) in rendered_panes {
+        for (viewport, pane_buffer) in rendered_panes {
             // Copy pane buffer to combined buffer at viewport position
             self.copy_buffer_to_region(
                 &pane_buffer,
@@ -249,10 +253,14 @@ impl Renderer {
                 viewport.height,
                 self.config.width,
             );
-            
-            // Update cursor position if this is the focused pane
-            if viewport.focused {
-                self.update_cursor_position_with_viewport(&term_lock, viewport);
+        }
+        
+        // Update cursor for focused pane (requires re-locking)
+        if let Some(focused_vp) = viewports.iter().find(|vp| vp.focused) {
+            if let Some(pane) = pane_tree.find_pane(focused_vp.pane_id) {
+                if let Some(term_lock) = pane.terminal.term().try_lock() {
+                    self.update_cursor_position_with_viewport(&term_lock, focused_vp);
+                }
             }
         }
 
