@@ -74,7 +74,9 @@ fn handle_double_click(
                 let grid_lines = grid.screen_lines();
                 selection_manager.expand_word(grid, mouse_state.position);
                 drop(term_lock);
-                renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
+                if let Some(mut renderer_lock) = renderer.try_lock() {
+                    renderer_lock.update_selection(selection_manager.range(), grid_cols, grid_lines);
+                }
             }
         }
     }
@@ -94,7 +96,9 @@ fn handle_triple_click(
                 let grid_lines = grid.screen_lines();
                 selection_manager.expand_line(grid, mouse_state.position);
                 drop(term_lock);
-                renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
+                if let Some(mut renderer_lock) = renderer.try_lock() {
+                    renderer_lock.update_selection(selection_manager.range(), grid_cols, grid_lines);
+                }
             }
         }
     }
@@ -141,7 +145,9 @@ pub(super) fn handle_cursor_moved(
             drop(renderer_lock);
             
             let (grid_cols, grid_lines) = get_grid_dimensions(tab_manager);
-            renderer.lock().update_selection(selection_manager.range(), grid_cols, grid_lines);
+            if let Some(mut renderer_lock) = renderer.try_lock() {
+                renderer_lock.update_selection(selection_manager.range(), grid_cols, grid_lines);
+            }
         }
     }
 }
@@ -170,7 +176,9 @@ pub(super) fn handle_mouse_wheel(
     };
 
     if scroll_delta.abs() > 0.001 {
-        renderer.lock().scroll(scroll_delta);
-        window.request_redraw();
+        if let Some(mut renderer_lock) = renderer.try_lock() {
+            renderer_lock.scroll(scroll_delta);
+            window.request_redraw();
+        }
     }
 }
