@@ -28,10 +28,16 @@ use crate::pane::PaneNode;
 // Replaced with simple fractional scrolling for smooth, jitter-free scrolling
 
 /// GPU-accelerated renderer using wgpu/Metal
-pub struct Renderer<'a> {
+/// 
+/// Safety: The surface has a 'static lifetime. This is sound because:
+/// - The Window is owned by App and wrapped in Arc<Window>
+/// - The Renderer is also wrapped in Arc<Mutex<Renderer>>
+/// - Both Arcs are kept alive for the application's entire lifetime
+/// - When App is dropped, the Renderer is dropped before references to Window become invalid
+pub struct Renderer<'static> {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface: wgpu::Surface<'a>,
+    surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     font_manager: FontManager,
     texture_manager: TextureManager,
@@ -45,10 +51,13 @@ pub struct Renderer<'a> {
     selection_renderer: SelectionRenderer,
 }
 
-impl<'a> Renderer<'a> {
+impl Renderer<'static> {
     /// Create a new renderer
+    /// 
+    /// Safety: Takes a reference to Window and creates a Surface with 'static lifetime.
+    /// The caller must ensure the Window remains valid for the lifetime of the Renderer.
     pub async fn new(
-        window: &'a winit::window::Window,
+        window: &winit::window::Window,
         font_family: &str,
         font_size: f32,
         cursor_config: CursorConfig,

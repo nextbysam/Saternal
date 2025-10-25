@@ -6,7 +6,7 @@ use winit::{
     event_loop::ControlFlow,
 };
 
-impl<'a> App<'a> {
+impl App {
     /// Run the application event loop
     pub fn run(self) -> Result<()> {
         let event_loop = self.event_loop;

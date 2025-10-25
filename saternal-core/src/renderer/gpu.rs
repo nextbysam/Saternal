@@ -3,16 +3,19 @@ use log::info;
 use wgpu;
 
 /// GPU context including device, queue, surface, and configuration
-pub(crate) struct GpuContext<'a> {
+/// 
+/// Safety: Uses 'static lifetime for Surface. The caller must ensure
+/// the Window remains valid for the Surface's lifetime.
+pub(crate) struct GpuContext<'static> {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub surface: wgpu::Surface<'a>,
+    pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
 }
 
-impl<'a> GpuContext<'a> {
+impl GpuContext<'static> {
     /// Initialize GPU context with wgpu/Metal
-    pub async fn new(window: &'a winit::window::Window) -> Result<Self> {
+    pub async fn new(window: &winit::window::Window) -> Result<Self> {
         info!("Initializing GPU renderer with Metal backend");
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {

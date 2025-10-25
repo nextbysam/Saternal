@@ -13,7 +13,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-impl<'a> App<'a> {
+impl App {
     /// Create a new application
     pub async fn new(config: saternal_core::Config) -> Result<Self> {
         info!("Initializing application");
@@ -46,12 +46,8 @@ impl<'a> App<'a> {
         }
         let dropdown = Arc::new(Mutex::new(dropdown));
 
-        let window_static: &'a winit::window::Window = unsafe {
-            std::mem::transmute(&*window as &winit::window::Window)
-        };
-        
         let mut renderer = Renderer::new(
-            window_static,
+            &window,
             &config.appearance.font_family,
             config.appearance.font_size,
             config.appearance.cursor,

@@ -7,11 +7,11 @@ use std::sync::Arc;
 use winit::event_loop::EventLoop;
 
 /// Main application state
-pub struct App<'a> {
+pub struct App {
     pub(super) config: Config,
     pub(super) event_loop: EventLoop<()>,
     pub(super) window: Arc<winit::window::Window>,
-    pub(super) renderer: Arc<Mutex<Renderer<'a>>>,
+    pub(super) renderer: Arc<Mutex<Renderer<'static>>>,
     pub(super) tab_manager: Arc<Mutex<crate::tab::TabManager>>,
     pub(super) dropdown: Arc<Mutex<DropdownWindow>>,
     pub(super) hotkey_manager: Arc<HotkeyManager>,
@@ -22,7 +22,7 @@ pub struct App<'a> {
     pub(super) mouse_state: MouseState,
 }
 
-impl<'a> App<'a> {
+impl App {
     /// Calculate terminal dimensions from window size
     /// Returns (cols, rows) with padding at bottom to prevent text cutoff
     pub(super) fn calculate_terminal_size(
