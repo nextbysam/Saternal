@@ -192,11 +192,17 @@ impl PaneNode {
                 // Split this pane
                 self.split(direction, new_id, new_cols.max(1), new_rows.max(1), shell)?;
 
-                // Set focus to new pane
+                // CRITICAL: Resize BOTH panes to their new dimensions
+                // After split, both the original pane (child 0) and new pane (child 1)
+                // need to be resized to fit their allocated space
                 if let PaneNode::Split { children, .. } = self {
-                    if let Some(child) = children.get_mut(0) {
-                        child.clear_focus();
+                    // Resize the original pane (left/top)
+                    if let Some(PaneNode::Leaf { pane }) = children.get_mut(0) {
+                        pane.terminal.resize(new_cols.max(1), new_rows.max(1))?;
+                        pane.focused = false;
                     }
+
+                    // Set focus to new pane (right/bottom)
                     if let Some(PaneNode::Leaf { pane }) = children.get_mut(1) {
                         pane.focused = true;
                     }
