@@ -34,7 +34,7 @@ use crate::pane::PaneNode;
 /// - The Renderer is also wrapped in Arc<Mutex<Renderer>>
 /// - Both Arcs are kept alive for the application's entire lifetime
 /// - When App is dropped, the Renderer is dropped before references to Window become invalid
-pub struct Renderer<'static> {
+pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
@@ -51,7 +51,7 @@ pub struct Renderer<'static> {
     selection_renderer: SelectionRenderer,
 }
 
-impl Renderer<'static> {
+impl Renderer {
     /// Create a new renderer
     /// 
     /// Safety: Takes a reference to Window and creates a Surface with 'static lifetime.

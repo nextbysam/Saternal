@@ -11,7 +11,7 @@ pub struct App {
     pub(super) config: Config,
     pub(super) event_loop: EventLoop<()>,
     pub(super) window: Arc<winit::window::Window>,
-    pub(super) renderer: Arc<Mutex<Renderer<'static>>>,
+    pub(super) renderer: Arc<Mutex<Renderer>>,
     pub(super) tab_manager: Arc<Mutex<crate::tab::TabManager>>,
     pub(super) dropdown: Arc<Mutex<DropdownWindow>>,
     pub(super) hotkey_manager: Arc<HotkeyManager>,

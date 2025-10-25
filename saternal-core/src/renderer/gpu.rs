@@ -6,15 +6,28 @@ use wgpu;
 /// 
 /// Safety: Uses 'static lifetime for Surface. The caller must ensure
 /// the Window remains valid for the Surface's lifetime.
-pub(crate) struct GpuContext<'static> {
+pub(crate) struct GpuContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
 }
 
-impl GpuContext<'static> {
+impl GpuContext {
     /// Initialize GPU context with wgpu/Metal
+    /// 
+    /// # Safety
+    /// 
+    /// The returned Surface has a 'static lifetime, but it's created from a borrowed Window.
+    /// The caller MUST ensure that:
+    /// - The Window remains valid for the entire lifetime of the returned GpuContext
+    /// - The Window is not dropped while the Surface is still in use
+    /// 
+    /// In our case, this is guaranteed because:
+    /// - Window is owned by App wrapped in Arc<Window>
+    /// - GpuContext (and thus Renderer) is also wrapped in Arc
+    /// - Both are kept alive for the application's entire lifetime
+    /// - The event loop consumes and holds these Arc references
     pub async fn new(window: &winit::window::Window) -> Result<Self> {
         info!("Initializing GPU renderer with Metal backend");
 
@@ -23,7 +36,19 @@ impl GpuContext<'static> {
             ..Default::default()
         });
 
-        let surface = instance.create_surface(window)?;
+        // Create surface with temporary lifetime
+        let surface_temp = instance.create_surface(window)?;
+        
+        // SAFETY: We transmute the surface lifetime from the borrowed window lifetime to 'static.
+        // This is sound because:
+        // 1. The Window is owned by App and wrapped in Arc<Window>
+        // 2. The GpuContext/Renderer is also wrapped in Arc<Mutex<Renderer<'static>>>
+        // 3. Both Arcs are kept alive for the application's entire lifetime
+        // 4. The Window will not be dropped while the Surface is in use
+        // 5. The event loop holds Arc clones of both, ensuring they live until app exit
+        let surface: wgpu::Surface<'static> = unsafe {
+            std::mem::transmute(surface_temp)
+        };
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
