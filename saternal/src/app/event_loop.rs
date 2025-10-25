@@ -25,7 +25,7 @@ impl<'a> App<'a> {
         info!("Starting event loop");
 
         event_loop.run(move |event, elwt| {
-            elwt.set_control_flow(ControlFlow::Poll);
+            elwt.set_control_flow(ControlFlow::Wait);
 
             hotkey_manager.process_events();
 
@@ -50,6 +50,7 @@ impl<'a> App<'a> {
                     ..
                 } => {
                     super::window::handle_resize(size, &renderer, &tab_manager, &window);
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -57,6 +58,7 @@ impl<'a> App<'a> {
                     ..
                 } => {
                     super::window::handle_scale_factor_changed(scale_factor, &renderer, &window);
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -75,6 +77,7 @@ impl<'a> App<'a> {
                         &mut font_size,
                         &window,
                     );
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -89,6 +92,7 @@ impl<'a> App<'a> {
                         &tab_manager,
                         &renderer,
                     );
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -103,6 +107,7 @@ impl<'a> App<'a> {
                         &renderer,
                         &tab_manager,
                     );
+                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
@@ -110,20 +115,24 @@ impl<'a> App<'a> {
                     ..
                 } => {
                     super::mouse::handle_mouse_wheel(delta, &renderer, &window);
+                    window.request_redraw();
                 }
 
                 Event::AboutToWait => {
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
-                            if let Err(e) = active_tab.process_output() {
-                                log::error!("Error processing output: {}", e);
+                            match active_tab.process_output() {
+                                Ok(_) => {
+                                    window.request_redraw();
+                                }
+                                Err(e) => {
+                                    log::error!("Error processing output: {}", e);
+                                }
                             }
                         } else {
                             log::warn!("No active tab found");
                         }
                     }
-
-                    window.request_redraw();
                 }
 
                 Event::WindowEvent {
