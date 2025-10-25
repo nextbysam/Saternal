@@ -8,7 +8,7 @@ pub(super) fn handle_copy(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     selection_manager: &mut SelectionManager,
 ) {
-    let clipboard = match Clipboard::new() {
+    let mut clipboard = match Clipboard::new() {
         Ok(cb) => cb,
         Err(e) => {
             log::error!("Failed to create clipboard: {}", e);
@@ -33,7 +33,7 @@ pub(super) fn handle_copy(
 
 /// Handle paste operation (Cmd+V)
 pub(super) fn handle_paste(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
-    let clipboard = match Clipboard::new() {
+    let mut clipboard = match Clipboard::new() {
         Ok(cb) => cb,
         Err(e) => {
             log::error!("Failed to create clipboard: {}", e);

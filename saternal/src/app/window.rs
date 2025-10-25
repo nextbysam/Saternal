@@ -1,3 +1,4 @@
+use alacritty_terminal::grid::Dimensions;
 use log::{debug, info};
 use parking_lot::Mutex;
 use saternal_core::Renderer;

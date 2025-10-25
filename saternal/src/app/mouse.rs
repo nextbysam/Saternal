@@ -1,3 +1,4 @@
+use alacritty_terminal::grid::Dimensions;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{MouseButton, MouseState, Renderer, SelectionManager, SelectionMode};
