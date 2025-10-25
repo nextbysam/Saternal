@@ -21,7 +21,8 @@ use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
-use crate::selection::{SelectionRange, SelectionRenderer};
+use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
+use crate::pane::PaneNode;
 
 // Deleted: ScrollAnimation spring physics (Step 2 - Delete unnecessary complexity)
 // Replaced with simple fractional scrolling for smooth, jitter-free scrolling
@@ -166,6 +167,41 @@ impl<'a> Renderer<'a> {
         }
 
         self.execute_render_pass()?;
+        Ok(())
+    }
+
+    /// Render a frame with pane tree (shows focused pane + borders)
+    pub fn render_with_panes<T>(&mut self, pane_tree: &PaneNode) -> Result<()> {
+        // Get focused pane
+        if let Some(focused_pane) = pane_tree.focused_pane() {
+            // Render focused pane's terminal (reuse existing render logic)
+            if let Some(term_lock) = focused_pane.terminal.term().try_lock() {
+                log::debug!("Rendering focused pane {}", focused_pane.id);
+                
+                // Clamp scroll offset to available history
+                let history_size = term_lock.grid().history_size();
+                self.scroll_offset = self.scroll_offset.min(history_size as f32);
+                
+                self.render_terminal_to_texture(&term_lock)?;
+                self.update_cursor_position(&term_lock);
+            } else {
+                log::warn!("Could not lock focused pane terminal for rendering");
+            }
+        } else {
+            log::warn!("No focused pane found");
+        }
+
+        // Update cursor blink
+        let blink_changed = self.cursor_state.update_blink();
+        if blink_changed {
+            self.cursor_state.upload_uniforms(&self.queue);
+        }
+
+        // Calculate pane viewports for border rendering
+        let viewports = calculate_pane_viewports(pane_tree, self.config.width, self.config.height);
+        
+        // Execute render pass with borders
+        self.execute_render_pass_with_borders(&viewports)?;
         Ok(())
     }
 

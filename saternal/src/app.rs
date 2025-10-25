@@ -7,7 +7,7 @@ use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
 use saternal_core::{
     Clipboard, Config, MouseButton, MouseState, Renderer, SearchState, SelectionManager, 
-    SelectionMode, key_to_bytes, InputModifiers, is_jump_to_bottom, pixel_to_grid,
+    SelectionMode, SplitDirection, key_to_bytes, InputModifiers, is_jump_to_bottom, pixel_to_grid,
 };
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
@@ -384,6 +384,60 @@ impl<'a> App<'a> {
                                 renderer.lock().update_selection(None, 80, 24);
                                 info!("Selection cleared");
                                 return;
+                            }
+                        }
+
+                        // Handle Tab / Shift+Tab for pane navigation
+                        if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Tab)) {
+                            let ctrl = modifiers_state.state().control_key();
+                            if ctrl {
+                                // Ctrl+Tab / Ctrl+Shift+Tab for pane cycling
+                                if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                    if shift {
+                                        active_tab.pane_tree.focus_prev();
+                                        info!("Focus moved to previous pane");
+                                    } else {
+                                        active_tab.pane_tree.focus_next();
+                                        info!("Focus moved to next pane");
+                                    }
+                                    window.request_redraw();
+                                }
+                                return;
+                            }
+                        }
+
+                        // Handle Ctrl+[key] for split pane operations
+                        let ctrl = modifiers_state.state().control_key();
+                        if ctrl {
+                            if let PhysicalKey::Code(keycode) = event.physical_key {
+                                match keycode {
+                                    KeyCode::KeyD => {
+                                        // Ctrl+D: Horizontal split (top/bottom)
+                                        info!("Splitting pane horizontally");
+                                        if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                            if let Err(e) = active_tab.split(
+                                                SplitDirection::Horizontal,
+                                                Some(config.terminal.shell.clone())
+                                            ) {
+                                                log::error!("Failed to split pane: {}", e);
+                                            }
+                                        }
+                                        window.request_redraw();
+                                        return;
+                                    }
+                                    KeyCode::KeyW => {
+                                        // Ctrl+W: Close focused pane
+                                        info!("Closing focused pane");
+                                        if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                            if let Err(e) = active_tab.close_focused_pane() {
+                                                log::error!("Failed to close pane: {}", e);
+                                            }
+                                        }
+                                        window.request_redraw();
+                                        return;
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
 

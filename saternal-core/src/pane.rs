@@ -139,6 +139,135 @@ impl PaneNode {
         }
     }
 
+    /// Split the currently focused pane
+    pub fn split_focused(
+        &mut self,
+        direction: SplitDirection,
+        new_id: usize,
+        shell: Option<String>,
+    ) -> Result<bool> {
+        match self {
+            PaneNode::Leaf { pane } if pane.focused => {
+                // Found the focused pane - split it
+                let (cols, rows) = pane.terminal.dimensions();
+
+                // Calculate split dimensions based on direction
+                let (new_cols, new_rows) = match direction {
+                    SplitDirection::Horizontal => (cols, rows / 2),
+                    SplitDirection::Vertical => (cols / 2, rows),
+                };
+
+                // Split this pane
+                self.split(direction, new_id, new_cols.max(1), new_rows.max(1), shell)?;
+
+                // Set focus to new pane
+                if let PaneNode::Split { children, .. } = self {
+                    if let Some(child) = children.get_mut(0) {
+                        child.clear_focus();
+                    }
+                    if let Some(PaneNode::Leaf { pane }) = children.get_mut(1) {
+                        pane.focused = true;
+                    }
+                }
+
+                Ok(true)
+            }
+            PaneNode::Leaf { .. } => Ok(false),
+            PaneNode::Split { children, .. } => {
+                // Recursively search children for focused pane
+                for child in children.iter_mut() {
+                    if child.split_focused(direction, new_id, shell.clone())? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+
+    /// Clear focus from all panes in this subtree
+    fn clear_focus(&mut self) {
+        match self {
+            PaneNode::Leaf { pane } => pane.focused = false,
+            PaneNode::Split { children, .. } => {
+                for child in children {
+                    child.clear_focus();
+                }
+            }
+        }
+    }
+
+    /// Move focus to next pane (circular)
+    pub fn focus_next(&mut self) -> bool {
+        let pane_ids = self.pane_ids();
+        if pane_ids.is_empty() {
+            return false;
+        }
+
+        if let Some(current_pane) = self.focused_pane() {
+            let current_id = current_pane.id;
+            if let Some(current_idx) = pane_ids.iter().position(|&id| id == current_id) {
+                let next_idx = (current_idx + 1) % pane_ids.len();
+                let next_id = pane_ids[next_idx];
+                return self.set_focus(next_id);
+            }
+        }
+        false
+    }
+
+    /// Move focus to previous pane (circular)
+    pub fn focus_prev(&mut self) -> bool {
+        let pane_ids = self.pane_ids();
+        if pane_ids.is_empty() {
+            return false;
+        }
+
+        if let Some(current_pane) = self.focused_pane() {
+            let current_id = current_pane.id;
+            if let Some(current_idx) = pane_ids.iter().position(|&id| id == current_id) {
+                let prev_idx = if current_idx == 0 {
+                    pane_ids.len() - 1
+                } else {
+                    current_idx - 1
+                };
+                let prev_id = pane_ids[prev_idx];
+                return self.set_focus(prev_id);
+            }
+        }
+        false
+    }
+
+    /// Close the focused pane and rebalance the tree
+    pub fn close_focused(&mut self) -> Result<bool> {
+        match self {
+            PaneNode::Leaf { pane } if pane.focused => {
+                // Can't close from leaf level - parent must handle
+                Ok(true)
+            }
+            PaneNode::Leaf { .. } => Ok(false),
+            PaneNode::Split { children, .. } => {
+                // Check if a direct child is focused and should be closed
+                for i in 0..children.len() {
+                    if let PaneNode::Leaf { pane } = &children[i] {
+                        if pane.focused && children.len() == 2 {
+                            // Remove this child and replace split with the other child
+                            let other_idx = 1 - i;
+                            let mut other_child = children.remove(other_idx);
+                            *self = other_child;
+                            return Ok(true);
+                        }
+                    }
+
+                    // Recursively check children
+                    if children[i].close_focused()? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+
     /// Resize all panes in the tree to specified terminal dimensions (cols x rows)
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<()> {
         match self {

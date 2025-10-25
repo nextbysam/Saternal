@@ -34,9 +34,27 @@ impl Tab {
         let pane_id = self.next_pane_id;
         self.next_pane_id += 1;
 
-        // For now, split the root
-        // TODO: Split only the focused pane
-        self.pane_tree.split(direction, pane_id, 80, 24, shell)?;
+        if !self.pane_tree.split_focused(direction, pane_id, shell)? {
+            log::warn!("No focused pane found to split");
+        }
+
+        Ok(())
+    }
+
+    /// Close the focused pane
+    pub fn close_focused_pane(&mut self) -> Result<()> {
+        // Don't close if it's the last pane
+        if self.pane_tree.pane_ids().len() <= 1 {
+            log::info!("Cannot close last pane");
+            return Ok(());
+        }
+
+        if self.pane_tree.close_focused()? {
+            // Focus the next available pane
+            if let Some(first_id) = self.pane_tree.pane_ids().first() {
+                self.pane_tree.set_focus(*first_id);
+            }
+        }
 
         Ok(())
     }

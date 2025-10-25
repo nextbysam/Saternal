@@ -15,5 +15,5 @@ pub use input::{key_to_bytes, InputModifiers, is_jump_to_bottom, MouseButton, Mo
 pub use pane::{Pane, PaneNode, SplitDirection};
 pub use renderer::Renderer;
 pub use search::{SearchEngine, SearchState};
-pub use selection::{SelectionManager, SelectionMode, SelectionRange};
+pub use selection::{SelectionManager, SelectionMode, SelectionRange, PaneViewport, calculate_pane_viewports};
 pub use terminal::{Terminal, TermEventListener};

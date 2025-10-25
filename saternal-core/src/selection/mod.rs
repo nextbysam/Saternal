@@ -4,7 +4,7 @@ mod smart;
 pub mod renderer;
 
 pub use range::{SelectionMode, SelectionRange};
-pub use renderer::SelectionRenderer;
+pub use renderer::{SelectionRenderer, PaneViewport, calculate_pane_viewports};
 
 use alacritty_terminal::grid::{Dimensions, Grid};
 use alacritty_terminal::index::Point;
