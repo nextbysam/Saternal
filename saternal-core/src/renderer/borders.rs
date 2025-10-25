@@ -47,8 +47,8 @@ impl Default for BorderConfig {
         Self {
             enabled: true,
             thickness: 2,
-            active_color: [0.29, 0.56, 0.89, 1.0],   // #4A90E2 blue
-            inactive_color: [0.24, 0.24, 0.24, 1.0], // #3C3C3C gray
+            active_color: [0.29, 0.56, 0.89, 0.6],   // #4A90E2 blue with 60% opacity
+            inactive_color: [0.24, 0.24, 0.24, 0.4], // #3C3C3C gray with 40% opacity
         }
     }
 }

@@ -28,7 +28,7 @@ impl App {
         let window = WindowBuilder::new()
             .with_title("Saternal")
             .with_decorations(false)
-            .with_transparent(false)
+            .with_transparent(true)
             .with_visible(false)
             .build(&event_loop)?;
 
@@ -179,6 +179,7 @@ impl App {
             clipboard,
             search_state,
             mouse_state,
+            command_buffer: String::new(),
         })
     }
 }

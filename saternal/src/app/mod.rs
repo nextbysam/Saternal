@@ -1,5 +1,5 @@
 mod clipboard;
-mod commands;
+pub(crate) mod commands;
 mod event_loop;
 mod init;
 mod input;

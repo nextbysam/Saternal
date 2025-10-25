@@ -1,6 +1,3 @@
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::Column;
-use alacritty_terminal::Term;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{
@@ -25,6 +22,7 @@ pub(super) fn handle_keyboard_input(
     config: &mut Config,
     font_size: &mut f32,
     window: &winit::window::Window,
+    command_buffer: &mut String,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -67,7 +65,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, command_buffer)
 }
 
 fn handle_escape(
@@ -283,6 +281,7 @@ fn handle_terminal_input(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
+    command_buffer: &mut String,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -299,10 +298,26 @@ fn handle_terminal_input(
     // Try to convert key to terminal bytes
     if let PhysicalKey::Code(keycode) = event.physical_key {
         if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
+            // Handle special keys that affect command buffer
+            if bytes == b"\r" || bytes == b"\n" {
+                // Check if command buffer contains a terminal command
+                if let Some(cmd) = crate::app::commands::parse_command(command_buffer) {
+                    // Execute command and clear buffer
+                    execute_command(cmd, renderer, window);
+                    command_buffer.clear();
+                    return true;
+                }
+                // Not a command, clear buffer and pass Enter to terminal
+                command_buffer.clear();
+            } else if bytes == b"\x7f" || bytes == b"\x08" {
+                // Backspace - remove last char from buffer
+                command_buffer.pop();
+            }
+
+            // Pass to terminal
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(&bytes);
             }
-            // Auto-scroll to bottom when user types input
             renderer.lock().reset_scroll();
             window.request_redraw();
             return true;
@@ -312,33 +327,17 @@ fn handle_terminal_input(
     // Handle regular text input
     if !input_mods.ctrl && !input_mods.alt {
         if let Some(text) = &event.text {
-            // Check if this is an Enter key - if so, check command buffer
-            if text == "\r" || text == "\n" {
-                // Try to get current line for command detection
-                // Note: This is a simplified approach - we check the input buffer
-                // For a more robust solution, we'd need to track typed characters
-                if let Some(tab_mgr) = tab_manager.try_lock() {
-                    if let Some(pane) = tab_mgr.active_tab().and_then(|t| t.pane_tree.focused_pane()) {
-                        if let Some(term) = pane.terminal.term().try_lock() {
-                            // Get the current line from the grid
-                            if let Some(line_text) = get_current_line_text(&term) {
-                                if let Some(cmd) = super::commands::parse_command(&line_text) {
-                                    // Execute command instead of passing to terminal
-                                    drop(term);
-                                    drop(tab_mgr);
-                                    execute_command(cmd, renderer, window);
-                                    return true;
-                                }
-                            }
-                        }
-                    }
+            // Add to command buffer for command detection
+            for ch in text.chars() {
+                if ch.is_ascii() && !ch.is_control() {
+                    command_buffer.push(ch);
                 }
             }
 
+            // Pass to terminal
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(text.as_bytes());
             }
-            // Auto-scroll to bottom when user types input
             renderer.lock().reset_scroll();
             window.request_redraw();
         }
@@ -347,35 +346,13 @@ fn handle_terminal_input(
     false
 }
 
-/// Get the current line text from the terminal (for command detection)
-fn get_current_line_text<T>(term: &Term<T>) -> Option<String> {
-    let grid = term.grid();
-    let cursor_line = grid.cursor.point.line;
-
-    // Extract text from the current line
-    let mut line_text = String::new();
-    for col in 0..grid.columns() {
-        let cell = &grid[cursor_line][Column(col)];
-        if cell.c != ' ' || !line_text.is_empty() {
-            line_text.push(cell.c);
-        }
-    }
-
-    let trimmed = line_text.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
 /// Execute a terminal command
 fn execute_command(
-    cmd: super::commands::TerminalCommand,
+    cmd: crate::app::commands::TerminalCommand,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
 ) {
-    use super::commands::TerminalCommand;
+    use crate::app::commands::TerminalCommand;
 
     let result = match &cmd {
         TerminalCommand::Wallpaper { path } => {
@@ -392,8 +369,8 @@ fn execute_command(
     };
 
     let _message = match result {
-        Ok(_) => super::commands::format_success(&cmd),
-        Err(e) => super::commands::format_error(&e),
+        Ok(_) => crate::app::commands::format_success_message(&cmd),
+        Err(e) => crate::app::commands::format_error_message(&cmd, &e.to_string()),
     };
 
     // Note: In a real implementation, we'd display the message in the terminal
