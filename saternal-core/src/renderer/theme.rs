@@ -26,7 +26,8 @@ impl ColorPalette {
     pub fn tokyo_night() -> Self {
         Self {
             // Background: Deep dark blue-purple
-            background: [0.09, 0.09, 0.13, 0.95], // #16161D with 95% opacity
+            // Alpha = 1.0 in texture; final opacity controlled by shader's background_opacity uniform
+            background: [0.09, 0.09, 0.13, 1.0], // #16161D, fully opaque in texture
             // Foreground: Light blue-white
             foreground: [0.76, 0.78, 0.84, 1.0],  // #C0CAF5
             // Cursor: Bright white with slight transparency

@@ -87,7 +87,7 @@ impl Default for Config {
                 palette: ColorPalette::default(),
                 font_family: "JetBrains Mono".to_string(),
                 font_size: 14.0,
-                opacity: 0.95,
+                opacity: 0.98,  // Increased from 0.95 for better visibility
                 blur: true,
                 cursor: CursorConfig::default(),
                 dpi_scale_override: None,

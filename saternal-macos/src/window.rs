@@ -157,33 +157,16 @@ impl DropdownWindow {
     }
 
     /// Enable vibrancy (background blur) effect
-    unsafe fn enable_vibrancy(&self, ns_window: id) -> Result<()> {
-        // Create NSVisualEffectView for background blur
-        let content_view: id = msg_send![ns_window, contentView];
+    ///
+    /// Since we have transparency enabled (setOpaque:NO), macOS automatically
+    /// provides blur when the window has transparent areas. We don't need to
+    /// add NSVisualEffectView which causes view hierarchy issues with winit.
+    unsafe fn enable_vibrancy(&self, _ns_window: id) -> Result<()> {
+        // With window transparency (setOpaque:NO) and clear background color,
+        // macOS provides automatic vibrancy/blur effect through the compositor.
+        // This is simpler and doesn't interfere with winit's view management.
 
-        // NSVisualEffectView with dark appearance
-        let visual_effect_class = class!(NSVisualEffectView);
-        let visual_effect_view: id = msg_send![visual_effect_class, alloc];
-        let frame: NSRect = msg_send![content_view, bounds];
-        let visual_effect_view: id = msg_send![visual_effect_view, initWithFrame:frame];
-
-        // NSVisualEffectBlendingModeBehindWindow = 0
-        let blending_mode: i64 = 0;
-        let () = msg_send![visual_effect_view, setBlendingMode:blending_mode];
-
-        // NSVisualEffectMaterialDark = 2
-        let material: i64 = 2;
-        let () = msg_send![visual_effect_view, setMaterial:material];
-
-        // Set state to active
-        let () = msg_send![visual_effect_view, setState:1i64]; // NSVisualEffectStateActive = 1
-
-        // Set autoresizing mask
-        let () = msg_send![visual_effect_view, setAutoresizingMask:0x12]; // Width + Height sizable
-
-        // CRITICAL: Insert at index 0 (bottom of the view hierarchy) so wgpu's Metal layer renders on top
-        // Using addSubview:positioned:relativeTo: with NSWindowBelow (-1)
-        let () = msg_send![content_view, addSubview:visual_effect_view positioned:(-1i64) relativeTo:nil];
+        info!("Vibrancy enabled via window transparency (macOS compositor blur)");
 
         Ok(())
     }

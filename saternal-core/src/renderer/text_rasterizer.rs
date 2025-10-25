@@ -68,8 +68,30 @@ impl TextRasterizer {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
 
-        // Create buffer for rendering terminal text
+        // Create buffer filled with background color (not transparent)
+        // This ensures empty areas have the terminal background color, not full transparency
+        let bg = palette.background;
+        let bg_r = (bg[0] * 255.0) as u8;
+        let bg_g = (bg[1] * 255.0) as u8;
+        let bg_b = (bg[2] * 255.0) as u8;
+        let bg_a = (bg[3] * 255.0) as u8;
+
         let mut buffer = vec![0u8; (width * height * 4) as usize];
+
+        // Fill buffer with background color
+        for pixel in buffer.chunks_exact_mut(4) {
+            if is_bgra {
+                pixel[0] = bg_b;
+                pixel[1] = bg_g;
+                pixel[2] = bg_r;
+                pixel[3] = bg_a;
+            } else {
+                pixel[0] = bg_r;
+                pixel[1] = bg_g;
+                pixel[2] = bg_b;
+                pixel[3] = bg_a;
+            }
+        }
 
         // Render each cell from the terminal grid
         let mut char_count = 0;

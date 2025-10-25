@@ -330,10 +330,15 @@ fn handle_terminal_input(
     // Handle regular text input
     if !input_mods.ctrl && !input_mods.alt {
         if let Some(text) = &event.text {
+            log::debug!("📝 Text input: '{}' (chars: {})", text, text.chars().collect::<Vec<_>>().len());
+
             // Add to command buffer for command detection
             for ch in text.chars() {
                 if ch.is_ascii() && !ch.is_control() {
                     command_buffer.push(ch);
+                    log::debug!("  ✓ Added '{}' to buffer, buffer now: '{}'", ch, command_buffer);
+                } else {
+                    log::debug!("  ✗ Skipped '{}' (ascii={}, control={})", ch, ch.is_ascii(), ch.is_control());
                 }
             }
 
@@ -343,6 +348,8 @@ fn handle_terminal_input(
             }
             renderer.lock().reset_scroll();
             window.request_redraw();
+        } else {
+            log::debug!("⚠️ Keyboard event without text field: {:?}", event.logical_key);
         }
     }
 
