@@ -70,19 +70,23 @@ impl GpuContext {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
-        // Choose the best supported alpha mode
+        // Choose alpha mode - MUST be PreMultiplied to match shader output
+        // The text rasterizer outputs premultiplied alpha (rgb * a), so the surface
+        // must use PreMultiplied mode for correct blending
         let alpha_mode =
             if surface_caps
-                .alpha_modes
-                .contains(&wgpu::CompositeAlphaMode::PostMultiplied)
-            {
-                wgpu::CompositeAlphaMode::PostMultiplied
-            } else if surface_caps
                 .alpha_modes
                 .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
             {
                 wgpu::CompositeAlphaMode::PreMultiplied
+            } else if surface_caps
+                .alpha_modes
+                .contains(&wgpu::CompositeAlphaMode::PostMultiplied)
+            {
+                log::warn!("PreMultiplied alpha not supported, falling back to PostMultiplied - transparency may not work correctly");
+                wgpu::CompositeAlphaMode::PostMultiplied
             } else {
+                log::warn!("Neither PreMultiplied nor PostMultiplied alpha supported, using default - transparency may not work");
                 surface_caps.alpha_modes[0]
             };
 

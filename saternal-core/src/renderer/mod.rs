@@ -110,17 +110,24 @@ impl Renderer {
 
         // Load wallpaper if path provided
         if let Some(path) = wallpaper_path {
-            if let Err(e) = wallpaper_manager.load(&gpu.device, &gpu.queue, path) {
-                log::warn!("Failed to load wallpaper: {}", e);
+            log::info!("Attempting to load wallpaper from: {}", path);
+            match wallpaper_manager.load(&gpu.device, &gpu.queue, path) {
+                Ok(_) => log::info!("✓ Wallpaper loaded successfully: {}", path),
+                Err(e) => log::error!("✗ WALLPAPER LOADING FAILED: {} - Error: {}", path, e),
             }
+        } else {
+            log::info!("No wallpaper path configured");
         }
 
         // Create opacity uniforms
+        let has_wallpaper = wallpaper_manager.has_wallpaper();
+        log::info!("Initializing opacity uniforms: wallpaper_opacity={}, background_opacity={}, has_wallpaper={}",
+                   wallpaper_opacity, background_opacity, has_wallpaper);
         let opacity_uniforms = OpacityUniforms::new(
             &gpu.device,
             wallpaper_opacity,
             background_opacity,
-            wallpaper_manager.has_wallpaper(),
+            has_wallpaper,
         );
 
         // Create render pipeline with all bind group layouts

@@ -301,13 +301,16 @@ fn handle_terminal_input(
             // Handle special keys that affect command buffer
             if bytes == b"\r" || bytes == b"\n" {
                 // Check if command buffer contains a terminal command
+                log::warn!("🔍 ENTER PRESSED - Command buffer: '{}'", command_buffer);
                 if let Some(cmd) = crate::app::commands::parse_command(command_buffer) {
                     // Execute command and clear buffer
+                    log::warn!("✓ COMMAND DETECTED: {:?}", cmd);
                     execute_command(cmd, renderer, window);
                     command_buffer.clear();
                     return true;
                 }
                 // Not a command, clear buffer and pass Enter to terminal
+                log::warn!("✗ NOT A COMMAND - Clearing buffer and passing to shell");
                 command_buffer.clear();
             } else if bytes == b"\x7f" || bytes == b"\x08" {
                 // Backspace - remove last char from buffer

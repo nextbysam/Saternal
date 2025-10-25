@@ -1,8 +1,80 @@
-# Wallpaper & Translucency Implementation - COMPLETE ✅
+# Wallpaper & Translucency Implementation - DEBUGGING ⚙️
 
-**Status**: ✅ Implemented and Built Successfully
+**Status**: ⚙️ Implemented, Debugging Transparency Issues
 **Date**: 2025-10-26
+**Last Update**: 2025-10-26 00:51
 **Architecture**: LEGO-style modular design
+
+## 🔧 Recent Bug Fixes (2025-10-26 00:30-00:51)
+
+### Critical Fixes Applied
+
+1. **Window Transparency Enabled** (init.rs:31)
+   - Changed `.with_transparent(false)` → `.with_transparent(true)`
+
+2. **Render Pass Clear Color Fixed** (renderer/mod.rs)
+   - Changed `a: 1.0` → `a: 0.0` (transparent clear color)
+   - This was causing opaque black background
+
+3. **Alpha Mode Configuration Fixed** (renderer/gpu.rs:73-91)
+   - **CRITICAL**: Flipped preference order to PreMultiplied first
+   - Previous code preferred PostMultiplied, causing alpha blending mismatch
+   - Text rasterizer outputs PreMultiplied alpha, surface MUST match
+
+4. **Command Detection System Rewritten** (app/input.rs)
+   - Replaced broken terminal grid reading with simple command buffer
+   - Commands now intercepted BEFORE being sent to shell
+   - Added: `command_buffer: String` to App state
+
+5. **Enhanced Error Logging** (renderer/mod.rs:112-120)
+   - Changed `log::warn!()` to `log::error!()` for wallpaper failures
+   - Added detailed logging for wallpaper load success/failure
+   - Added logging for opacity uniforms initialization
+
+### Files Modified in Bug Fix Session
+
+1. `saternal/src/app/init.rs` - Window transparency + command_buffer init
+2. `saternal/src/app/state.rs` - Added command_buffer field
+3. `saternal/src/app/event_loop.rs` - Pass command_buffer to input handler
+4. `saternal/src/app/input.rs` - Complete command detection rewrite
+5. `saternal-core/src/config.rs` - Set default wallpaper for testing
+6. `saternal-core/src/renderer/mod.rs` - Clear color + logging fixes
+7. `saternal-core/src/renderer/gpu.rs` - **CRITICAL** Alpha mode fix
+
+### Root Cause Analysis
+
+**Problem**: Terminal displayed as completely black, no transparency or wallpaper
+
+**Investigation Findings**:
+1. Window created with `transparent: false` (FIXED)
+2. Render pass cleared to opaque black `a: 1.0` (FIXED)
+3. **Alpha mode mismatch** - Surface used PostMultiplied, shader outputs PreMultiplied (FIXED)
+4. Command detection tried to read from terminal grid instead of intercepting input (FIXED)
+
+**The Alpha Mode Bug** (Most Critical):
+- Text rasterizer premultiplies alpha: `rgb = rgb * alpha` (text_rasterizer.rs:163-167)
+- Shader outputs premultiplied colors
+- But surface was configured for PostMultiplied if available
+- Result: Alpha blending completely broken, causing black screen
+
+### Diagnostic Commands
+
+When you run the app, check logs for these messages:
+
+```bash
+# Expected SUCCESS messages:
+✓ Wallpaper loaded successfully: /Users/sam/saternal/beautiful.png
+Initializing opacity uniforms: wallpaper_opacity=0.3, background_opacity=0.95, has_wallpaper=true
+Using surface format: Bgra8UnormSrgb, alpha mode: PreMultiplied
+
+# If you see ERROR:
+✗ WALLPAPER LOADING FAILED: /Users/sam/saternal/beautiful.png - Error: ...
+# This means image loading failed - check file path and format
+
+# If you see PostMultiplied:
+Using surface format: Bgra8UnormSrgb, alpha mode: PostMultiplied
+# Transparency will be broken - update wgpu/macOS drivers
+```
 
 ---
 

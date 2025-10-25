@@ -93,14 +93,12 @@ impl DropdownWindow {
         // but can receive key events when visible
         let () = msg_send![ns_window, setHidesOnDeactivate:NO];
 
-        // CRITICAL: Don't make window transparent - this prevents Metal from rendering
-        // The window needs to be opaque for the Metal layer to be visible
-        // We'll handle transparency through the rendering itself
-        let () = msg_send![ns_window, setOpaque:YES];
+        // CRITICAL: Set window to transparent for vibrancy/wallpaper to work
+        let () = msg_send![ns_window, setOpaque:NO];
 
-        // Set a black background so we can see if Metal is rendering
-        let black_color: id = msg_send![class!(NSColor), blackColor];
-        let () = msg_send![ns_window, setBackgroundColor:black_color];
+        // Set a clear background for transparency
+        let clear_color: id = msg_send![class!(NSColor), clearColor];
+        let () = msg_send![ns_window, setBackgroundColor:clear_color];
 
         // CRITICAL: Make the WINIT VIEW layer-backed BEFORE wgpu creates the surface
         // wgpu will add the CAMetalLayer to THIS view, not the window's contentView!
@@ -119,14 +117,15 @@ impl DropdownWindow {
     /// Enable vibrancy after wgpu surface is created
     /// Call this AFTER the renderer is initialized
     pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id) -> Result<()> {
-        // First, let's inspect and configure the Metal layer on the winit view
+        // First, configure the Metal layer for transparency
         self.configure_metal_layer(ns_view)?;
-        // Don't add vibrancy yet - let's just get Metal rendering working first
-        // self.enable_vibrancy(ns_window)
+        // Enable vibrancy (blur) effect
+        self.enable_vibrancy(ns_window)?;
+        info!("✓ Vibrancy (blur) effect enabled");
         Ok(())
     }
 
-    /// Configure the CAMetalLayer to be visible and opaque
+    /// Configure the CAMetalLayer for transparency
     /// ns_view is the winit NSView where wgpu adds the CAMetalLayer
     unsafe fn configure_metal_layer(&self, ns_view: id) -> Result<()> {
         // Get the layer from the WINIT VIEW (not the window's contentView!)
@@ -143,13 +142,13 @@ impl DropdownWindow {
             let class_str = std::ffi::CStr::from_ptr(class_name).to_str().unwrap_or("unknown");
             info!("Layer class: {}", class_str);
 
-            // Make sure layer is opaque
-            let () = msg_send![layer, setOpaque:YES];
+            // CRITICAL: Set layer to transparent for blur/wallpaper to work
+            let () = msg_send![layer, setOpaque:NO];
 
             // Ensure it's not hidden
             let () = msg_send![layer, setHidden:NO];
 
-            info!("Layer configured: opaque=YES, hidden=NO");
+            info!("Layer configured: opaque=NO (transparent), hidden=NO");
         } else {
             info!("WARNING: No layer found on winit NSView! wgpu may not have created it yet.");
         }
