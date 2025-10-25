@@ -58,6 +58,9 @@ arboard = "3.3"  # Clipboard support
 regex = "1.10"   # Smart selection patterns
 rayon = "1.8"    # Parallel rendering
 
+# Image loading
+image = "0.25"   # Wallpaper support (PNG, JPG, WEBP)
+
 [profile.release]
 opt-level = 3
 lto = true

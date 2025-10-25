@@ -6,25 +6,15 @@ struct BorderRect {
     size: vec2<f32>,          // NDC size (width, height)
 }
 
-// Padded viewport ID for std140 uniform buffer array alignment
-// In std140, struct arrays must have 32-byte stride when used in uniform buffers
-struct ViewportId {
-    id: u32,                  // Pane ID (4 bytes)
-    _padding: vec3<u32>,      // Padding to 16 bytes (12 bytes)
-    _padding2: vec4<u32>,     // Additional padding to 32 bytes (16 bytes)
-}
-
 struct BorderUniform {
-    rects: array<BorderRect, 32>,        // 32 border rectangles (512 bytes)
-    _array_padding1: vec4<u32>,           // Padding after array (16 bytes) - std140 requirement
-    count: u32,                           // Number of active borders (4 bytes)
-    thickness: f32,                       // Border thickness in pixels (4 bytes)
-    _padding1: vec2<u32>,                 // Padding to 16-byte boundary (8 bytes)
-    active_color: vec4<f32>,              // RGBA color for focused pane (16 bytes)
-    inactive_color: vec4<f32>,            // RGBA color for unfocused panes (16 bytes)
-    viewport_ids: array<ViewportId, 32>,  // Pane IDs with 32-byte stride (1024 bytes)
-    focused_id: u32,                      // ID of focused pane (4 bytes)
-    _padding2: vec3<u32>,                 // Final padding (12 bytes)
+    rects: array<BorderRect, 32>,     // 32 border rectangles (512 bytes)
+    viewport_ids: array<vec4<u32>, 8>, // 8 vec4s holding 32 pane IDs (128 bytes) - std140 requires 16-byte stride
+    count: u32,                        // Number of active borders (4 bytes)
+    thickness: f32,                    // Border thickness in pixels (4 bytes)
+    focused_id: u32,                   // ID of focused pane (4 bytes)
+    _padding1: u32,                    // Padding to 16-byte boundary (4 bytes)
+    active_color: vec4<f32>,           // RGBA color for focused pane (16 bytes)
+    inactive_color: vec4<f32>,         // RGBA color for unfocused panes (16 bytes)
 }
 
 @group(0) @binding(0)
@@ -51,7 +41,13 @@ fn vs_main(
 
     // Get the border rect for this instance
     let rect = borders.rects[instance_index];
-    let pane_id = borders.viewport_ids[instance_index].id;
+
+    // Extract pane ID from packed vec4 array
+    // Each vec4 holds 4 IDs, so divide by 4 to get vec4 index, modulo 4 to get element within vec4
+    let vec_index = instance_index / 4u;
+    let elem_index = instance_index % 4u;
+    let id_vec = borders.viewport_ids[vec_index];
+    let pane_id = id_vec[elem_index];
 
     // Determine color based on focus state
     let is_focused = (pane_id == borders.focused_id);

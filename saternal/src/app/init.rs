@@ -56,6 +56,9 @@ impl App {
             config.appearance.font_size,
             config.appearance.cursor,
             config.appearance.palette,
+            config.appearance.wallpaper_path.as_deref(),
+            config.appearance.wallpaper_opacity,
+            config.appearance.opacity,
         )
         .await?;
         

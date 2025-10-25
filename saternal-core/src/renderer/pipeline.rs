@@ -1,10 +1,12 @@
 use wgpu;
 use wgpu::util::DeviceExt;
 
-/// Create the render pipeline for text rendering
+/// Create the render pipeline for text rendering with wallpaper support
 pub(crate) fn create_render_pipeline(
     device: &wgpu::Device,
-    bind_group_layout: &wgpu::BindGroupLayout,
+    terminal_bind_group_layout: &wgpu::BindGroupLayout,
+    wallpaper_bind_group_layout: &wgpu::BindGroupLayout,
+    opacity_bind_group_layout: &wgpu::BindGroupLayout,
     surface_format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -14,7 +16,11 @@ pub(crate) fn create_render_pipeline(
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Render Pipeline Layout"),
-        bind_group_layouts: &[bind_group_layout],
+        bind_group_layouts: &[
+            terminal_bind_group_layout,  // @group(0) - Terminal texture
+            wallpaper_bind_group_layout, // @group(1) - Wallpaper texture
+            opacity_bind_group_layout,   // @group(2) - Opacity uniforms
+        ],
         push_constant_ranges: &[],
     });
 

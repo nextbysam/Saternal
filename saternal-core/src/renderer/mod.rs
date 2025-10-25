@@ -2,10 +2,12 @@ mod borders;
 mod color;
 pub mod cursor;
 mod gpu;
+mod opacity;
 mod pipeline;
 mod text_rasterizer;
 mod texture;
 pub mod theme;
+mod wallpaper;
 
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
@@ -20,10 +22,12 @@ use wgpu;
 use borders::BorderRenderer;
 use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
+use opacity::OpacityUniforms;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
+use wallpaper::WallpaperManager;
 use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
 use crate::pane::PaneNode;
 
@@ -53,12 +57,14 @@ pub struct Renderer {
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
     border_renderer: BorderRenderer,
+    wallpaper_manager: WallpaperManager,
+    opacity_uniforms: OpacityUniforms,
     _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
 impl Renderer {
     /// Create a new renderer
-    /// 
+    ///
     /// Takes Arc<Window> to ensure proper lifetime management through drop order guarantees.
     pub async fn new(
         window: std::sync::Arc<winit::window::Window>,
@@ -66,6 +72,9 @@ impl Renderer {
         font_size: f32,
         cursor_config: CursorConfig,
         color_palette: ColorPalette,
+        wallpaper_path: Option<&str>,
+        wallpaper_opacity: f32,
+        background_opacity: f32,
     ) -> Result<Self> {
         // Initialize GPU context
         let gpu = GpuContext::new(window.clone()).await?;
@@ -95,10 +104,30 @@ impl Renderer {
             gpu.config.format,
         );
 
-        // Create render pipeline
+        // Create wallpaper manager
+        let mut wallpaper_manager = WallpaperManager::new(&gpu.device);
+
+        // Load wallpaper if path provided
+        if let Some(path) = wallpaper_path {
+            if let Err(e) = wallpaper_manager.load(&gpu.device, &gpu.queue, path) {
+                log::warn!("Failed to load wallpaper: {}", e);
+            }
+        }
+
+        // Create opacity uniforms
+        let opacity_uniforms = OpacityUniforms::new(
+            &gpu.device,
+            wallpaper_opacity,
+            background_opacity,
+            wallpaper_manager.has_wallpaper(),
+        );
+
+        // Create render pipeline with all bind group layouts
         let render_pipeline = create_render_pipeline(
             &gpu.device,
             &texture_manager.bind_group_layout,
+            wallpaper_manager.bind_group_layout(),
+            opacity_uniforms.bind_group_layout(),
             gpu.config.format,
         );
 
@@ -135,6 +164,8 @@ impl Renderer {
             color_palette,
             selection_renderer,
             border_renderer,
+            wallpaper_manager,
+            opacity_uniforms,
             _window: window, // Must be last to ensure correct drop order
         })
     }
@@ -455,6 +486,8 @@ impl Renderer {
             log::trace!("Setting pipeline and drawing quad...");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_bind_group(1, self.wallpaper_manager.bind_group(), &[]);
+            render_pass.set_bind_group(2, self.opacity_uniforms.bind_group(), &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             log::trace!("Drawing 6 vertices for fullscreen quad");
             render_pass.draw(0..6, 0..1);
@@ -529,6 +562,8 @@ impl Renderer {
             // Draw terminal content
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_bind_group(1, self.wallpaper_manager.bind_group(), &[]);
+            render_pass.set_bind_group(2, self.opacity_uniforms.bind_group(), &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
 
@@ -698,9 +733,55 @@ impl Renderer {
         // Update text rasterizer
         self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
         
-        info!("DPI updated: effective font size={}, cell={}x{}", 
+        info!("DPI updated: effective font size={}, cell={}x{}",
               effective_size, cell_width, cell_height);
-        
+
         Ok(())
+    }
+
+    /// Set or clear wallpaper
+    pub fn set_wallpaper(&mut self, path: Option<&str>) -> Result<()> {
+        match path {
+            Some(p) => {
+                info!("Setting wallpaper: {}", p);
+                self.wallpaper_manager.load(&self.device, &self.queue, p)?;
+            }
+            None => {
+                info!("Clearing wallpaper");
+                self.wallpaper_manager.clear(&self.device);
+            }
+        }
+
+        // Update opacity uniforms with new wallpaper status
+        self.opacity_uniforms.update(
+            &self.queue,
+            self.opacity_uniforms.wallpaper_opacity(),
+            self.opacity_uniforms.background_opacity(),
+            self.wallpaper_manager.has_wallpaper(),
+        );
+
+        Ok(())
+    }
+
+    /// Set wallpaper opacity
+    pub fn set_wallpaper_opacity(&mut self, opacity: f32) {
+        info!("Setting wallpaper opacity: {}", opacity);
+        self.opacity_uniforms.update(
+            &self.queue,
+            opacity,
+            self.opacity_uniforms.background_opacity(),
+            self.wallpaper_manager.has_wallpaper(),
+        );
+    }
+
+    /// Set background opacity
+    pub fn set_background_opacity(&mut self, opacity: f32) {
+        info!("Setting background opacity: {}", opacity);
+        self.opacity_uniforms.update(
+            &self.queue,
+            self.opacity_uniforms.wallpaper_opacity(),
+            opacity,
+            self.wallpaper_manager.has_wallpaper(),
+        );
     }
 }
