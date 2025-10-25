@@ -129,8 +129,9 @@ pub(super) fn handle_cursor_moved(
 ) {
     if let Some(mut renderer_lock) = renderer.try_lock() {
         let fm = renderer_lock.font_manager();
-        let line_metrics = fm.font().horizontal_line_metrics(fm.font_size()).unwrap();
-        let cell_width = fm.font().metrics('M', fm.font_size()).advance_width;
+        let effective_size = fm.effective_font_size();
+        let line_metrics = fm.font().horizontal_line_metrics(effective_size).unwrap();
+        let cell_width = fm.font().metrics('M', effective_size).advance_width;
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         
         mouse_state.update_position(x, y, cell_width, cell_height);
