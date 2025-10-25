@@ -60,11 +60,13 @@ impl PaneNode {
         rows: usize,
         shell: Option<String>,
     ) -> Result<()> {
-        // Take ownership of self
+        // Take ownership of self without constructing a dummy pane
         let old_node = std::mem::replace(
             self,
-            PaneNode::Leaf {
-                pane: Pane::new(0, 1, 1, None)?,
+            PaneNode::Split {
+                direction,
+                children: Vec::new(),
+                ratio: 0.5,
             },
         );
 
@@ -72,12 +74,11 @@ impl PaneNode {
         let new_pane = Pane::new(new_id, cols, rows, shell)?;
         let new_node = PaneNode::Leaf { pane: new_pane };
 
-        // Create split with old and new nodes
-        *self = PaneNode::Split {
-            direction,
-            children: vec![old_node, new_node],
-            ratio: 0.5,
-        };
+        // Populate children with old and new nodes
+        if let PaneNode::Split { children, .. } = self {
+            children.push(old_node);
+            children.push(new_node);
+        }
 
         info!("Split pane in {:?} direction", direction);
         Ok(())
@@ -135,6 +136,172 @@ impl PaneNode {
             PaneNode::Leaf { pane } => vec![pane.id],
             PaneNode::Split { children, .. } => {
                 children.iter().flat_map(|c| c.pane_ids()).collect()
+            }
+        }
+    }
+
+    /// Get all panes in the tree with their IDs
+    pub fn all_panes(&self) -> Vec<(usize, &Pane)> {
+        match self {
+            PaneNode::Leaf { pane } => vec![(pane.id, pane)],
+            PaneNode::Split { children, .. } => {
+                children.iter().flat_map(|c| c.all_panes()).collect()
+            }
+        }
+    }
+
+    /// Get all panes in the tree mutably with their IDs
+    pub fn all_panes_mut(&mut self) -> Vec<(usize, &mut Pane)> {
+        match self {
+            PaneNode::Leaf { pane } => vec![(pane.id, pane)],
+            PaneNode::Split { children, .. } => {
+                children.iter_mut().flat_map(|c| c.all_panes_mut()).collect()
+            }
+        }
+    }
+
+    /// Find a pane by ID
+    pub fn find_pane(&self, id: usize) -> Option<&Pane> {
+        match self {
+            PaneNode::Leaf { pane } if pane.id == id => Some(pane),
+            PaneNode::Leaf { .. } => None,
+            PaneNode::Split { children, .. } => {
+                children.iter().find_map(|child| child.find_pane(id))
+            }
+        }
+    }
+
+    /// Split the currently focused pane
+    pub fn split_focused(
+        &mut self,
+        direction: SplitDirection,
+        new_id: usize,
+        shell: Option<String>,
+    ) -> Result<bool> {
+        match self {
+            PaneNode::Leaf { pane } if pane.focused => {
+                // Found the focused pane - split it
+                let (cols, rows) = pane.terminal.dimensions();
+
+                // Calculate split dimensions based on direction
+                let (new_cols, new_rows) = match direction {
+                    SplitDirection::Horizontal => (cols, rows / 2),
+                    SplitDirection::Vertical => (cols / 2, rows),
+                };
+
+                // Split this pane
+                self.split(direction, new_id, new_cols.max(1), new_rows.max(1), shell)?;
+
+                // CRITICAL: Resize BOTH panes to their new dimensions
+                // After split, both the original pane (child 0) and new pane (child 1)
+                // need to be resized to fit their allocated space
+                if let PaneNode::Split { children, .. } = self {
+                    // Resize the original pane (left/top)
+                    if let Some(PaneNode::Leaf { pane }) = children.get_mut(0) {
+                        pane.terminal.resize(new_cols.max(1), new_rows.max(1))?;
+                        pane.focused = false;
+                    }
+
+                    // Set focus to new pane (right/bottom)
+                    if let Some(PaneNode::Leaf { pane }) = children.get_mut(1) {
+                        pane.focused = true;
+                    }
+                }
+
+                Ok(true)
+            }
+            PaneNode::Leaf { .. } => Ok(false),
+            PaneNode::Split { children, .. } => {
+                // Recursively search children for focused pane
+                for child in children.iter_mut() {
+                    if child.split_focused(direction, new_id, shell.clone())? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+
+    /// Clear focus from all panes in this subtree
+    fn clear_focus(&mut self) {
+        match self {
+            PaneNode::Leaf { pane } => pane.focused = false,
+            PaneNode::Split { children, .. } => {
+                for child in children {
+                    child.clear_focus();
+                }
+            }
+        }
+    }
+
+    /// Move focus to next pane (circular)
+    pub fn focus_next(&mut self) -> bool {
+        let pane_ids = self.pane_ids();
+        if pane_ids.is_empty() {
+            return false;
+        }
+
+        if let Some(current_pane) = self.focused_pane() {
+            let current_id = current_pane.id;
+            if let Some(current_idx) = pane_ids.iter().position(|&id| id == current_id) {
+                let next_idx = (current_idx + 1) % pane_ids.len();
+                let next_id = pane_ids[next_idx];
+                return self.set_focus(next_id);
+            }
+        }
+        false
+    }
+
+    /// Move focus to previous pane (circular)
+    pub fn focus_prev(&mut self) -> bool {
+        let pane_ids = self.pane_ids();
+        if pane_ids.is_empty() {
+            return false;
+        }
+
+        if let Some(current_pane) = self.focused_pane() {
+            let current_id = current_pane.id;
+            if let Some(current_idx) = pane_ids.iter().position(|&id| id == current_id) {
+                let prev_idx = if current_idx == 0 {
+                    pane_ids.len() - 1
+                } else {
+                    current_idx - 1
+                };
+                let prev_id = pane_ids[prev_idx];
+                return self.set_focus(prev_id);
+            }
+        }
+        false
+    }
+
+    /// Close the focused pane and rebalance the tree
+    pub fn close_focused(&mut self) -> Result<bool> {
+        match self {
+            PaneNode::Leaf { pane } if pane.focused => {
+                // Can't close from leaf level - parent must handle
+                Ok(true)
+            }
+            PaneNode::Leaf { .. } => Ok(false),
+            PaneNode::Split { children, .. } => {
+                // Check if a direct child is focused and should be closed
+                for i in 0..children.len() {
+                    if let PaneNode::Leaf { pane } = &children[i] {
+                        if pane.focused && children.len() == 2 {
+                            // Remove this child and replace split with the other child
+                            let other_idx = 1 - i;
+                            let mut other_child = children.remove(other_idx);
+                            *self = other_child;
+                            return Ok(true);
+                        }
+                    }
+
+                    // Recursively check children
+                    if children[i].close_focused()? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
         }
     }

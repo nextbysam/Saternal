@@ -53,7 +53,7 @@ pub struct CursorState {
     pub bind_group: wgpu::BindGroup,
     pub bind_group_layout: wgpu::BindGroupLayout,
     blink_state: BlinkState,
-    config: CursorConfig,
+    pub config: CursorConfig,
     current_uniforms: CursorUniforms,
 }
 
@@ -173,6 +173,33 @@ impl CursorState {
         
         log::debug!("Cursor state: pixel=({:.1}, {:.1}), ndc=({:.3}, {:.3}), size=({:.3}, {:.3}), visible={}, scroll={}, hide={}",
                    pixel_x, pixel_y, ndc_x, ndc_y, ndc_width, ndc_height, visible, scroll_offset, hide_cursor);
+
+        self.current_uniforms = CursorUniforms {
+            position: [ndc_x, ndc_y],
+            size: [ndc_width, ndc_height],
+            color: self.config.color,
+            visible,
+            style: self.config.style as u32,
+            _padding: [0, 0],
+        };
+    }
+
+    /// Update cursor with pre-calculated NDC coordinates (for viewport-based rendering)
+    pub fn update_position_ndc(
+        &mut self,
+        ndc_x: f32,
+        ndc_y: f32,
+        ndc_width: f32,
+        ndc_height: f32,
+        hide_cursor: bool,
+    ) {
+        let visible = if hide_cursor {
+            0
+        } else if self.config.blink {
+            self.blink_state.visible as u32
+        } else {
+            1
+        };
 
         self.current_uniforms = CursorUniforms {
             position: [ndc_x, ndc_y],

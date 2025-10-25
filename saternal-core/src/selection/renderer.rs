@@ -1,7 +1,7 @@
-/// GPU-accelerated selection highlight rendering
+/// GPU-accelerated selection highlight rendering and pane border rendering
 use super::range::SelectionRange;
-use alacritty_terminal::grid::{Dimensions, Grid};
-use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::grid::Dimensions;
+use crate::pane::PaneNode;
 use wgpu;
 use wgpu::util::DeviceExt;
 
@@ -15,6 +15,110 @@ struct SelectionSpan {
 
 unsafe impl bytemuck::Pod for SelectionSpan {}
 unsafe impl bytemuck::Zeroable for SelectionSpan {}
+
+/// Viewport for rendering a single pane
+#[derive(Debug, Clone)]
+pub struct PaneViewport {
+    pub pane_id: usize,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub focused: bool,
+}
+
+/// Calculate viewports for all panes in the tree
+pub fn calculate_pane_viewports(
+    pane_tree: &PaneNode,
+    window_width: u32,
+    window_height: u32,
+) -> Vec<PaneViewport> {
+    let mut viewports = Vec::new();
+    calculate_viewports_recursive(
+        pane_tree,
+        0, 0,
+        window_width, window_height,
+        &mut viewports
+    );
+    viewports
+}
+
+fn calculate_viewports_recursive(
+    node: &PaneNode,
+    x: u32, y: u32,
+    width: u32, height: u32,
+    viewports: &mut Vec<PaneViewport>
+) {
+    use crate::pane::{PaneNode as PN, SplitDirection};
+    
+    match node {
+        PN::Leaf { pane } => {
+            viewports.push(PaneViewport {
+                pane_id: pane.id,
+                x, y, width, height,
+                focused: pane.focused,
+            });
+        }
+        PN::Split { direction, children, ratio } => {
+            const BORDER_WIDTH: u32 = 2;
+            let a = BORDER_WIDTH / 2;
+            let b = BORDER_WIDTH - a;
+
+            match direction {
+                SplitDirection::Horizontal => {
+                    // Top/bottom split
+                    let split_y = (height as f32 * ratio) as u32;
+
+                    if let Some(top) = children.get(0) {
+                        calculate_viewports_recursive(
+                            top,
+                            x, y,
+                            width,
+                            split_y.saturating_sub(a),
+                            viewports
+                        );
+                    }
+
+                    if let Some(bottom) = children.get(1) {
+                        calculate_viewports_recursive(
+                            bottom,
+                            x,
+                            y + split_y + b,
+                            width,
+                            height.saturating_sub(split_y + b),
+                            viewports
+                        );
+                    }
+                }
+                SplitDirection::Vertical => {
+                    // Left/right split
+                    let split_x = (width as f32 * ratio) as u32;
+
+                    if let Some(left) = children.get(0) {
+                        calculate_viewports_recursive(
+                            left,
+                            x, y,
+                            split_x.saturating_sub(a),
+                            height,
+                            viewports
+                        );
+                    }
+
+                    if let Some(right) = children.get(1) {
+                        calculate_viewports_recursive(
+                            right,
+                            x + split_x + b,
+                            y,
+                            width.saturating_sub(split_x + b),
+                            height,
+                            viewports
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Selection uniform data (matches shader layout)
 #[repr(C)]

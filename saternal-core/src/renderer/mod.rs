@@ -12,25 +12,33 @@ use alacritty_terminal::term::{Term, TermMode};
 use anyhow::Result;
 use log::info;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::sync::Arc;
 use wgpu;
 
-use cursor::{create_cursor_pipeline, CursorConfig, CursorState};
+use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
-use crate::selection::{SelectionRange, SelectionRenderer};
+use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
+use crate::pane::PaneNode;
 
 // Deleted: ScrollAnimation spring physics (Step 2 - Delete unnecessary complexity)
 // Replaced with simple fractional scrolling for smooth, jitter-free scrolling
 
 /// GPU-accelerated renderer using wgpu/Metal
-pub struct Renderer<'a> {
+/// 
+/// Safety: The Surface has a 'static lifetime, but is actually tied to the Window's lifetime.
+/// This is sound because:
+/// 1. We store Arc<Window> to keep the window alive
+/// 2. Rust drops struct fields in declaration order (top to bottom)
+/// 3. Therefore, surface drops before _window, preventing use-after-free
+pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface: wgpu::Surface<'a>,
+    surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     font_manager: FontManager,
     texture_manager: TextureManager,
@@ -42,22 +50,25 @@ pub struct Renderer<'a> {
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
+    _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
-impl<'a> Renderer<'a> {
+impl Renderer {
     /// Create a new renderer
+    /// 
+    /// Takes Arc<Window> to ensure proper lifetime management through drop order guarantees.
     pub async fn new(
-        window: &'a winit::window::Window,
+        window: std::sync::Arc<winit::window::Window>,
         font_family: &str,
         font_size: f32,
         cursor_config: CursorConfig,
         color_palette: ColorPalette,
     ) -> Result<Self> {
         // Initialize GPU context
-        let gpu = GpuContext::new(window).await?;
+        let gpu = GpuContext::new(window.clone()).await?;
 
         // Get current DPI scale factor
-        let scale_factor = window.scale_factor();
+        let scale_factor = window.as_ref().scale_factor();
         let font_manager = FontManager::new_with_scale(font_family, font_size, scale_factor)?;
 
         // Calculate cell dimensions and baseline using effective font size
@@ -117,6 +128,7 @@ impl<'a> Renderer<'a> {
             cursor_pipeline,
             color_palette,
             selection_renderer,
+            _window: window, // Must be last to ensure correct drop order
         })
     }
 
@@ -169,6 +181,147 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
+    /// Render a frame with pane tree (shows all panes in their viewports)
+    /// Uses parallel rendering for improved performance with multiple panes
+    pub fn render_with_panes(&mut self, pane_tree: &PaneNode) -> Result<()> {
+        // Calculate pane viewports
+        let viewports = calculate_pane_viewports(pane_tree, self.config.width, self.config.height);
+        
+        // Create a black buffer for the entire window
+        let total_pixels = (self.config.width * self.config.height) as usize;
+        let mut combined_buffer = vec![0u8; total_pixels * 4];
+
+        // Collect pane data for parallel rendering (clone Arc<Mutex> to own it)
+        let pane_data: Vec<_> = viewports.iter()
+            .filter_map(|viewport| {
+                pane_tree.find_pane(viewport.pane_id).map(|pane| {
+                    let term_arc = pane.terminal.term();  // Clone Arc for ownership
+                    (term_arc, viewport)
+                })
+            })
+            .collect();
+
+        // Extract immutable references for parallel access
+        let text_rasterizer = &self.text_rasterizer;
+        let font_manager = &self.font_manager;
+        let surface_format = self.config.format;
+        let color_palette = &self.color_palette;
+        let scroll_offset = self.scroll_offset;
+
+        // PARALLEL: Render all panes simultaneously on multiple CPU cores
+        // Returns (viewport, buffer) pairs for successful renders
+        let rendered_panes: Vec<(&PaneViewport, Vec<u8>)> = pane_data.par_iter()
+            .filter_map(|(term_arc, viewport)| {
+                // Try to lock terminal (non-blocking)
+                let term_lock = term_arc.try_lock()?;
+                
+                log::debug!("Rendering pane {} to viewport ({}, {}) {}x{}", 
+                    viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height);
+                
+                // Clamp scroll offset to available history for focused pane
+                let pane_scroll_offset = if viewport.focused {
+                    let history_size = term_lock.grid().history_size();
+                    scroll_offset.min(history_size as f32).round() as usize
+                } else {
+                    0 // Non-focused panes show live view
+                };
+                
+                // Render this pane's terminal to a viewport-sized buffer (CPU-bound work)
+                let pane_buffer = text_rasterizer.render_to_buffer(
+                    &term_lock,
+                    font_manager,
+                    viewport.width,
+                    viewport.height,
+                    pane_scroll_offset,
+                    surface_format,
+                    color_palette,
+                ).ok()?;
+                
+                Some((*viewport, pane_buffer))
+            })
+            .collect();
+
+        // SEQUENTIAL: Copy buffers to combined buffer and update cursor
+        for (viewport, pane_buffer) in rendered_panes {
+            // Copy pane buffer to combined buffer at viewport position
+            self.copy_buffer_to_region(
+                &pane_buffer,
+                &mut combined_buffer,
+                viewport.x,
+                viewport.y,
+                viewport.width,
+                viewport.height,
+                self.config.width,
+            );
+        }
+        
+        // Update cursor for focused pane (requires re-locking)
+        if let Some(focused_vp) = viewports.iter().find(|vp| vp.focused) {
+            if let Some(pane) = pane_tree.find_pane(focused_vp.pane_id) {
+                if let Some(term_lock) = pane.terminal.term().try_lock() {
+                    self.update_cursor_position_with_viewport(&term_lock, focused_vp);
+                }
+            }
+        }
+
+        // Upload combined buffer to GPU texture
+        log::debug!("Uploading {}x{} combined texture to GPU", self.config.width, self.config.height);
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.texture_manager.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &combined_buffer,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(self.config.width * 4),
+                rows_per_image: Some(self.config.height),
+            },
+            wgpu::Extent3d {
+                width: self.config.width,
+                height: self.config.height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // Update cursor blink
+        let blink_changed = self.cursor_state.update_blink();
+        if blink_changed {
+            self.cursor_state.upload_uniforms(&self.queue);
+        }
+        
+        // Execute render pass with borders
+        self.execute_render_pass_with_borders(&viewports)?;
+        Ok(())
+    }
+
+    /// Copy a buffer to a specific region of the combined buffer
+    fn copy_buffer_to_region(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        dst_x: u32,
+        dst_y: u32,
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+    ) {
+        let bytes_per_pixel = 4;
+        for y in 0..src_height {
+            let src_row_start = (y * src_width * bytes_per_pixel) as usize;
+            let src_row_end = src_row_start + (src_width * bytes_per_pixel) as usize;
+            
+            let dst_row_start = ((dst_y + y) * dst_width * bytes_per_pixel + dst_x * bytes_per_pixel) as usize;
+            let dst_row_end = dst_row_start + (src_width * bytes_per_pixel) as usize;
+            
+            if src_row_end <= src.len() && dst_row_end <= dst.len() {
+                dst[dst_row_start..dst_row_end].copy_from_slice(&src[src_row_start..src_row_end]);
+            }
+        }
+    }
+
     /// Update cursor position based on terminal state
     fn update_cursor_position<T>(&mut self, term: &Term<T>) {
         let cursor_pos = term.grid().cursor.point;
@@ -204,6 +357,55 @@ impl<'a> Renderer<'a> {
         );
         
         // Upload uniforms to GPU
+        self.cursor_state.upload_uniforms(&self.queue);
+    }
+
+    /// Update cursor position with viewport offset
+    fn update_cursor_position_with_viewport<T>(&mut self, term: &Term<T>, viewport: &PaneViewport) {
+        let cursor_pos = term.grid().cursor.point;
+        
+        let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR) 
+                          || self.scroll_offset > 0.01;
+        
+        let effective_size = self.font_manager.effective_font_size();
+        let line_metrics = self.font_manager.font()
+            .horizontal_line_metrics(effective_size)
+            .unwrap();
+        let cell_width = self.font_manager.font()
+            .metrics('M', effective_size)
+            .advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+        // Calculate cursor position relative to viewport
+        const PADDING_LEFT: f32 = 10.0;
+        const PADDING_TOP: f32 = 5.0;
+        let cursor_pixel_x = viewport.x as f32 + cursor_pos.column.0 as f32 * cell_width + PADDING_LEFT;
+        let cursor_pixel_y = viewport.y as f32 + cursor_pos.line.0 as f32 * cell_height + PADDING_TOP;
+        
+        // Convert to NDC
+        let ndc_x = (cursor_pixel_x / self.config.width as f32) * 2.0 - 1.0;
+        let mut ndc_y = -((cursor_pixel_y / self.config.height as f32) * 2.0 - 1.0);
+        
+        // Calculate size based on cursor style
+        let (width, height) = match self.cursor_state.config.style {
+            CursorStyle::Block => (cell_width, cell_height),
+            CursorStyle::Beam => (2.0, cell_height),
+            CursorStyle::Underline => (cell_width, 2.0),
+        };
+
+        let ndc_width = (width / self.config.width as f32) * 2.0;
+        let ndc_height = -((height / self.config.height as f32) * 2.0);
+        
+        // Adjust Y for underline style
+        if matches!(self.cursor_state.config.style, CursorStyle::Underline) {
+            ndc_y += (cell_height - 2.0) / self.config.height as f32 * 2.0;
+        }
+        
+        log::debug!("Cursor at viewport offset: pixel=({:.1}, {:.1}), ndc=({:.3}, {:.3})", 
+                   cursor_pixel_x, cursor_pixel_y, ndc_x, ndc_y);
+        
+        // Use pre-calculated NDC coordinates
+        self.cursor_state.update_position_ndc(ndc_x, ndc_y, ndc_width, ndc_height, hide_cursor);
         self.cursor_state.upload_uniforms(&self.queue);
     }
 
@@ -274,6 +476,87 @@ impl<'a> Renderer<'a> {
         frame.present();
 
         Ok(())
+    }
+
+    /// Execute the GPU render pass with pane borders
+    fn execute_render_pass_with_borders(&mut self, viewports: &[PaneViewport]) -> Result<()> {
+        log::trace!("Getting surface texture for rendering...");
+        let frame = self.surface.get_current_texture()?;
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // Draw terminal content
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..6, 0..1);
+            
+            // Draw selection highlights
+            if self.selection_renderer.has_selection() {
+                self.selection_renderer.upload_uniforms(&self.queue);
+                render_pass.set_pipeline(self.selection_renderer.pipeline());
+                render_pass.set_bind_group(0, self.selection_renderer.bind_group(), &[]);
+                let instance_count = self.selection_renderer.instance_count();
+                render_pass.draw(0..6, 0..instance_count);
+            }
+            
+            // Draw cursor overlay
+            if self.cursor_state.is_visible() {
+                render_pass.set_pipeline(&self.cursor_pipeline);
+                render_pass.set_bind_group(0, &self.cursor_state.bind_group, &[]);
+                render_pass.draw(0..6, 0..1);
+            }
+
+            // Draw pane borders if we have multiple panes
+            if viewports.len() > 1 {
+                log::trace!("Drawing {} pane borders", viewports.len());
+                self.render_pane_borders(&mut render_pass, viewports);
+            }
+        }
+        
+        self.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
+
+        Ok(())
+    }
+
+    /// Render pane borders (simple rectangles for now)
+    fn render_pane_borders(&self, render_pass: &mut wgpu::RenderPass, viewports: &[PaneViewport]) {
+        // For now, just log that we would draw borders
+        // TODO: Implement actual border rendering with a shader
+        for viewport in viewports {
+            let color = if viewport.focused { "blue" } else { "gray" };
+            log::trace!("Pane {} at ({}, {}) {}x{} - {}", 
+                viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height, color);
+        }
     }
 
     /// Render terminal content to texture (CPU-based for simplicity)

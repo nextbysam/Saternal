@@ -34,9 +34,27 @@ impl Tab {
         let pane_id = self.next_pane_id;
         self.next_pane_id += 1;
 
-        // For now, split the root
-        // TODO: Split only the focused pane
-        self.pane_tree.split(direction, pane_id, 80, 24, shell)?;
+        if !self.pane_tree.split_focused(direction, pane_id, shell)? {
+            log::warn!("No focused pane found to split");
+        }
+
+        Ok(())
+    }
+
+    /// Close the focused pane
+    pub fn close_focused_pane(&mut self) -> Result<()> {
+        // Don't close if it's the last pane
+        if self.pane_tree.pane_ids().len() <= 1 {
+            log::info!("Cannot close last pane");
+            return Ok(());
+        }
+
+        if self.pane_tree.close_focused()? {
+            // Focus the next available pane
+            if let Some(first_id) = self.pane_tree.pane_ids().first() {
+                self.pane_tree.set_focus(*first_id);
+            }
+        }
 
         Ok(())
     }
@@ -51,12 +69,15 @@ impl Tab {
 
     /// Process output from all panes
     pub fn process_output(&mut self) -> Result<()> {
-        // TODO: Process output from all panes, not just focused
-        if let Some(pane) = self.pane_tree.focused_pane_mut() {
-            log::trace!("Tab {}: Processing pane output", self.id);
-            pane.terminal.process_output()?;
-        } else {
-            log::warn!("Tab {}: No focused pane found", self.id);
+        // Process PTY output from ALL panes, not just focused
+        // This ensures inactive panes continue to show live updates
+        let panes = self.pane_tree.all_panes_mut();
+        for (pane_id, pane) in panes {
+            log::trace!("Tab {}: Processing output from pane {}", self.id, pane_id);
+            // Ignore errors for individual panes (e.g., if PTY is closed)
+            if let Err(e) = pane.terminal.process_output() {
+                log::debug!("Pane {} output processing error: {}", pane_id, e);
+            }
         }
         Ok(())
     }
