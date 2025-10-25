@@ -718,40 +718,31 @@ impl<'a> App<'a> {
                     ..
                 } => {
                     // Render the frame with pane tree
-                    if let Some(mut renderer) = renderer.try_lock() {
-                        // Get the active tab's pane tree and history size
-                        let (pane_tree_opt, history_size) = if let Some(tab_mgr) = tab_manager.try_lock() {
-                            if let Some(tab) = tab_mgr.active_tab() {
-                                // Get history size from focused pane
-                                let history_size = if let Some(pane) = tab.pane_tree.focused_pane() {
-                                    if let Some(term_lock) = pane.terminal.term().try_lock() {
-                                        term_lock.history_size()
-                                    } else {
-                                        0
-                                    }
+                    // We need to hold both locks during rendering to avoid lifetime issues
+                    if let (Some(mut renderer), Some(tab_mgr)) = (renderer.try_lock(), tab_manager.try_lock()) {
+                        if let Some(tab) = tab_mgr.active_tab() {
+                            // Get history size from focused pane
+                            let history_size = if let Some(pane) = tab.pane_tree.focused_pane() {
+                                if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                    term_lock.history_size()
                                 } else {
                                     0
-                                };
-                                (Some(&tab.pane_tree), history_size)
+                                }
                             } else {
-                                (None, 0)
-                            }
-                        } else {
-                            (None, 0)
-                        };
+                                0
+                            };
 
-                        // Update window title based on scroll position
-                        let scroll_offset = renderer.scroll_offset();
-                        if scroll_offset > 0 && history_size > 0 {
-                            let percentage = (scroll_offset * 100) / history_size.max(1);
-                            window.set_title(&format!("Saternal [↑ {}%] - Press Shift+G to jump to bottom", percentage));
-                        } else {
-                            window.set_title("Saternal");
-                        }
-                        
-                        // Render with pane tree
-                        if let Some(pane_tree) = pane_tree_opt {
-                            if let Err(e) = renderer.render_with_panes(pane_tree) {
+                            // Update window title based on scroll position
+                            let scroll_offset = renderer.scroll_offset();
+                            if scroll_offset > 0 && history_size > 0 {
+                                let percentage = (scroll_offset * 100) / history_size.max(1);
+                                window.set_title(&format!("Saternal [↑ {}%] - Press Shift+G to jump to bottom", percentage));
+                            } else {
+                                window.set_title("Saternal");
+                            }
+                            
+                            // Render with pane tree (holding lock during render)
+                            if let Err(e) = renderer.render_with_panes(&tab.pane_tree) {
                                 log::error!("Render error: {}", e);
                             }
                         }
