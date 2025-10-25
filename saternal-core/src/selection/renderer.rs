@@ -61,6 +61,8 @@ fn calculate_viewports_recursive(
         }
         PN::Split { direction, children, ratio } => {
             const BORDER_WIDTH: u32 = 2;
+            let a = BORDER_WIDTH / 2;
+            let b = BORDER_WIDTH - a;
 
             match direction {
                 SplitDirection::Horizontal => {
@@ -72,7 +74,7 @@ fn calculate_viewports_recursive(
                             top,
                             x, y,
                             width,
-                            split_y.saturating_sub(BORDER_WIDTH / 2),
+                            split_y.saturating_sub(a),
                             viewports
                         );
                     }
@@ -81,9 +83,9 @@ fn calculate_viewports_recursive(
                         calculate_viewports_recursive(
                             bottom,
                             x,
-                            y + split_y + BORDER_WIDTH / 2,
+                            y + split_y + b,
                             width,
-                            height.saturating_sub(split_y + BORDER_WIDTH),
+                            height.saturating_sub(split_y + b),
                             viewports
                         );
                     }
@@ -96,7 +98,7 @@ fn calculate_viewports_recursive(
                         calculate_viewports_recursive(
                             left,
                             x, y,
-                            split_x.saturating_sub(BORDER_WIDTH / 2),
+                            split_x.saturating_sub(a),
                             height,
                             viewports
                         );
@@ -105,9 +107,9 @@ fn calculate_viewports_recursive(
                     if let Some(right) = children.get(1) {
                         calculate_viewports_recursive(
                             right,
-                            x + split_x + BORDER_WIDTH / 2,
+                            x + split_x + b,
                             y,
-                            width.saturating_sub(split_x + BORDER_WIDTH),
+                            width.saturating_sub(split_x + b),
                             height,
                             viewports
                         );
