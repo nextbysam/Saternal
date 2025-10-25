@@ -2,12 +2,10 @@ mod borders;
 mod color;
 pub mod cursor;
 mod gpu;
-mod opacity;
 mod pipeline;
 mod text_rasterizer;
 mod texture;
 pub mod theme;
-mod wallpaper;
 
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
@@ -22,12 +20,10 @@ use wgpu;
 use borders::BorderRenderer;
 use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
-use opacity::OpacityUniforms;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
-use wallpaper::WallpaperManager;
 use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
 use crate::pane::PaneNode;
 
@@ -57,8 +53,6 @@ pub struct Renderer {
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
     border_renderer: BorderRenderer,
-    wallpaper_manager: WallpaperManager,
-    opacity_uniforms: OpacityUniforms,
     _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
