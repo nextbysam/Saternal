@@ -20,6 +20,8 @@ pub(crate) struct TextRasterizer {
 impl TextRasterizer {
     /// Create a new text rasterizer with cell dimensions
     pub fn new(cell_width: f32, cell_height: f32, baseline_offset: f32) -> Self {
+        // NOTE: Padding values must match App::calculate_terminal_size() in saternal/src/app/state.rs
+        // to ensure terminal PTY size accounts for these margins
         Self {
             cell_width,
             cell_height,

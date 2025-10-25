@@ -57,7 +57,8 @@ impl DropdownWindow {
 
     /// Configure a winit window to behave as a dropdown terminal
     /// ns_view is the winit NSView where wgpu will create the CAMetalLayer
-    pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<()> {
+    /// Returns (width, height, scale_factor) for terminal sizing
+    pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<(u32, u32, f64)> {
         // Get screen containing mouse cursor (active screen)
         let screen = Self::get_screen_with_mouse();
         let screen_frame: NSRect = msg_send![screen, frame];
@@ -106,10 +107,13 @@ impl DropdownWindow {
         let () = msg_send![ns_view, setWantsLayer:YES];
         info!("Set winit NSView to layer-backed mode");
 
-        info!("Configured dropdown window: {}x{} at ({}, {})",
-              window_width, window_height, window_x, window_y);
+        // Get the screen's scale factor for proper terminal sizing
+        let backing_scale_factor: f64 = msg_send![screen, backingScaleFactor];
 
-        Ok(())
+        info!("Configured dropdown window: {}x{} at ({}, {}) with scale factor {:.2}x",
+              window_width, window_height, window_x, window_y, backing_scale_factor);
+
+        Ok((window_width as u32, window_height as u32, backing_scale_factor))
     }
 
     /// Enable vibrancy after wgpu surface is created

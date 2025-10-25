@@ -24,15 +24,28 @@ pub struct App {
 
 impl App {
     /// Calculate terminal dimensions from window size
-    /// Returns (cols, rows) with padding at bottom to prevent text cutoff
+    /// Returns (cols, rows) accounting for padding to prevent text cutoff
     pub(super) fn calculate_terminal_size(
         window_width: u32,
         window_height: u32,
         cell_width: f32,
         cell_height: f32,
     ) -> (usize, usize) {
-        let cols = ((window_width as f32) / cell_width).floor() as usize;
-        let rows = (((window_height as f32) / cell_height).floor() - 1.0).max(24.0) as usize;
-        (cols.max(80), rows)
+        // Padding constants must match text_rasterizer.rs
+        const PADDING_LEFT: f32 = 10.0;
+        const PADDING_TOP: f32 = 5.0;
+        const PADDING_RIGHT: f32 = 10.0;
+        const PADDING_BOTTOM: f32 = 10.0; // Ensure bottom line is visible
+        
+        // Calculate available space after padding
+        let available_width = (window_width as f32 - PADDING_LEFT - PADDING_RIGHT).max(0.0);
+        let available_height = (window_height as f32 - PADDING_TOP - PADDING_BOTTOM).max(0.0);
+        
+        // Calculate terminal dimensions from available space
+        let cols = (available_width / cell_width).floor() as usize;
+        let rows = (available_height / cell_height).floor() as usize;
+        
+        // Ensure minimum dimensions
+        (cols.max(80), rows.max(24))
     }
 }

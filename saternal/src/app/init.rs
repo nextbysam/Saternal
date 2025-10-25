@@ -35,15 +35,19 @@ impl App {
         let window = Arc::new(window);
 
         let dropdown = DropdownWindow::new();
-        unsafe {
+        let (window_width, window_height, window_scale_factor) = unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
                     let ns_window: id = msg_send![ns_view, window];
-                    dropdown.configure_window(ns_window, ns_view, config.window.height_percentage)?;
+                    dropdown.configure_window(ns_window, ns_view, config.window.height_percentage)?
+                } else {
+                    return Err(anyhow::anyhow!("Failed to get AppKit window handle"));
                 }
+            } else {
+                return Err(anyhow::anyhow!("Failed to get window handle"));
             }
-        }
+        };
         let dropdown = Arc::new(Mutex::new(dropdown));
 
         let mut renderer = Renderer::new(
@@ -55,24 +59,27 @@ impl App {
         )
         .await?;
         
-        if let Some(scale_override) = config.appearance.dpi_scale_override {
-            info!("Applying DPI scale override: {:.2}x", scale_override);
-            renderer.handle_scale_factor_changed(scale_override)?;
+        // Apply DPI scale from the window's screen (or override if configured)
+        let effective_scale = config.appearance.dpi_scale_override.unwrap_or(window_scale_factor);
+        if effective_scale != window.scale_factor() {
+            info!("Applying scale factor: {:.2}x (window reported: {:.2}x)", 
+                  effective_scale, window.scale_factor());
+            renderer.handle_scale_factor_changed(effective_scale)?;
         }
         
-        let window_size = window.inner_size();
+        // Calculate terminal dimensions from the actual window dimensions
         let effective_size = renderer.font_manager().effective_font_size();
         let line_metrics = renderer.font_manager().font().horizontal_line_metrics(effective_size).unwrap();
         let cell_width = renderer.font_manager().font().metrics('M', effective_size).advance_width;
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let (initial_cols, initial_rows) = Self::calculate_terminal_size(
-            window_size.width,
-            window_size.height,
+            window_width,
+            window_height,
             cell_width,
             cell_height
         );
-        info!("Calculated initial terminal size: {}x{} for window {}x{}",
-              initial_cols, initial_rows, window_size.width, window_size.height);
+        info!("Calculated initial terminal size: {}x{} for window {}x{} (scale: {:.2}x)",
+              initial_cols, initial_rows, window_width, window_height, effective_scale);
         
         let renderer = Arc::new(Mutex::new(renderer));
 
