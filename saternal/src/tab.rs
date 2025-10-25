@@ -68,18 +68,23 @@ impl Tab {
     }
 
     /// Process output from all panes
-    pub fn process_output(&mut self) -> Result<()> {
+    /// Returns the total number of bytes processed across all panes
+    pub fn process_output(&mut self) -> Result<usize> {
         // Process PTY output from ALL panes, not just focused
         // This ensures inactive panes continue to show live updates
         let panes = self.pane_tree.all_panes_mut();
+        let mut total_bytes = 0;
         for (pane_id, pane) in panes {
             log::trace!("Tab {}: Processing output from pane {}", self.id, pane_id);
             // Ignore errors for individual panes (e.g., if PTY is closed)
-            if let Err(e) = pane.terminal.process_output() {
-                log::debug!("Pane {} output processing error: {}", pane_id, e);
+            match pane.terminal.process_output() {
+                Ok(bytes) => total_bytes += bytes,
+                Err(e) => {
+                    log::debug!("Pane {} output processing error: {}", pane_id, e);
+                }
             }
         }
-        Ok(())
+        Ok(total_bytes)
     }
 
     /// Resize the tab to fit new dimensions

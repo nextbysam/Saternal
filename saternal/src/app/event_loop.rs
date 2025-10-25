@@ -123,8 +123,11 @@ impl App {
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
                             match active_tab.process_output() {
-                                Ok(_) => {
-                                    window.request_redraw();
+                                Ok(bytes_processed) => {
+                                    // Only request redraw if there was actual output
+                                    if bytes_processed > 0 {
+                                        window.request_redraw();
+                                    }
                                 }
                                 Err(e) => {
                                     log::error!("Error processing output: {}", e);
