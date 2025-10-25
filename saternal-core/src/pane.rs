@@ -150,6 +150,16 @@ impl PaneNode {
         }
     }
 
+    /// Get all panes in the tree mutably with their IDs
+    pub fn all_panes_mut(&mut self) -> Vec<(usize, &mut Pane)> {
+        match self {
+            PaneNode::Leaf { pane } => vec![(pane.id, pane)],
+            PaneNode::Split { children, .. } => {
+                children.iter_mut().flat_map(|c| c.all_panes_mut()).collect()
+            }
+        }
+    }
+
     /// Find a pane by ID
     pub fn find_pane(&self, id: usize) -> Option<&Pane> {
         match self {

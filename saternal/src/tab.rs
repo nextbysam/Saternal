@@ -69,12 +69,15 @@ impl Tab {
 
     /// Process output from all panes
     pub fn process_output(&mut self) -> Result<()> {
-        // TODO: Process output from all panes, not just focused
-        if let Some(pane) = self.pane_tree.focused_pane_mut() {
-            log::trace!("Tab {}: Processing pane output", self.id);
-            pane.terminal.process_output()?;
-        } else {
-            log::warn!("Tab {}: No focused pane found", self.id);
+        // Process PTY output from ALL panes, not just focused
+        // This ensures inactive panes continue to show live updates
+        let panes = self.pane_tree.all_panes_mut();
+        for (pane_id, pane) in panes {
+            log::trace!("Tab {}: Processing output from pane {}", self.id, pane_id);
+            // Ignore errors for individual panes (e.g., if PTY is closed)
+            if let Err(e) = pane.terminal.process_output() {
+                log::debug!("Pane {} output processing error: {}", pane_id, e);
+            }
         }
         Ok(())
     }

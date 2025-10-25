@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use wgpu;
 
-use cursor::{create_cursor_pipeline, CursorConfig, CursorState};
+use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
@@ -377,28 +377,35 @@ impl Renderer {
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
 
         // Calculate cursor position relative to viewport
-        let cursor_pixel_x = viewport.x as f32 + cursor_pos.column.0 as f32 * cell_width + 10.0; // PADDING_LEFT
-        let cursor_pixel_y = viewport.y as f32 + cursor_pos.line.0 as f32 * cell_height + 5.0; // PADDING_TOP
+        const PADDING_LEFT: f32 = 10.0;
+        const PADDING_TOP: f32 = 5.0;
+        let cursor_pixel_x = viewport.x as f32 + cursor_pos.column.0 as f32 * cell_width + PADDING_LEFT;
+        let cursor_pixel_y = viewport.y as f32 + cursor_pos.line.0 as f32 * cell_height + PADDING_TOP;
         
         // Convert to NDC
         let ndc_x = (cursor_pixel_x / self.config.width as f32) * 2.0 - 1.0;
-        let ndc_y = -((cursor_pixel_y / self.config.height as f32) * 2.0 - 1.0);
+        let mut ndc_y = -((cursor_pixel_y / self.config.height as f32) * 2.0 - 1.0);
         
-        log::debug!("Cursor at viewport offset: pixel=({}, {}), ndc=({}, {})", 
+        // Calculate size based on cursor style
+        let (width, height) = match self.cursor_state.config.style {
+            CursorStyle::Block => (cell_width, cell_height),
+            CursorStyle::Beam => (2.0, cell_height),
+            CursorStyle::Underline => (cell_width, 2.0),
+        };
+
+        let ndc_width = (width / self.config.width as f32) * 2.0;
+        let ndc_height = -((height / self.config.height as f32) * 2.0);
+        
+        // Adjust Y for underline style
+        if matches!(self.cursor_state.config.style, CursorStyle::Underline) {
+            ndc_y += (cell_height - 2.0) / self.config.height as f32 * 2.0;
+        }
+        
+        log::debug!("Cursor at viewport offset: pixel=({:.1}, {:.1}), ndc=({:.3}, {:.3})", 
                    cursor_pixel_x, cursor_pixel_y, ndc_x, ndc_y);
         
-        // For now, use the existing update_position method
-        // This needs refinement to properly handle viewport offsets
-        self.cursor_state.update_position(
-            cursor_pos,
-            cell_width,
-            cell_height,
-            self.config.width,
-            self.config.height,
-            0,
-            hide_cursor,
-        );
-        
+        // Use pre-calculated NDC coordinates
+        self.cursor_state.update_position_ndc(ndc_x, ndc_y, ndc_width, ndc_height, hide_cursor);
         self.cursor_state.upload_uniforms(&self.queue);
     }
 
