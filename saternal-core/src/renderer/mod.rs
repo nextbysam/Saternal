@@ -1,3 +1,4 @@
+mod borders;
 mod color;
 pub mod cursor;
 mod gpu;
@@ -16,6 +17,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use wgpu;
 
+use borders::BorderRenderer;
 use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
@@ -50,6 +52,7 @@ pub struct Renderer {
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
+    border_renderer: BorderRenderer,
     _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
@@ -113,6 +116,9 @@ impl Renderer {
         // Create selection renderer
         let selection_renderer = SelectionRenderer::new(&gpu.device, gpu.config.format);
 
+        // Create border renderer
+        let border_renderer = BorderRenderer::new(&gpu.device, gpu.config.format);
+
         Ok(Self {
             device: gpu.device,
             queue: gpu.queue,
@@ -128,6 +134,7 @@ impl Renderer {
             cursor_pipeline,
             color_palette,
             selection_renderer,
+            border_renderer,
             _window: window, // Must be last to ensure correct drop order
         })
     }
@@ -480,6 +487,12 @@ impl Renderer {
 
     /// Execute the GPU render pass with pane borders
     fn execute_render_pass_with_borders(&mut self, viewports: &[PaneViewport]) -> Result<()> {
+        // Update border renderer with current viewports
+        if viewports.len() > 1 {
+            self.border_renderer.update(viewports, self.config.width, self.config.height);
+            self.border_renderer.upload_uniforms(&self.queue);
+        }
+
         log::trace!("Getting surface texture for rendering...");
         let frame = self.surface.get_current_texture()?;
         let view = frame
@@ -518,7 +531,7 @@ impl Renderer {
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
-            
+
             // Draw selection highlights
             if self.selection_renderer.has_selection() {
                 self.selection_renderer.upload_uniforms(&self.queue);
@@ -527,7 +540,7 @@ impl Renderer {
                 let instance_count = self.selection_renderer.instance_count();
                 render_pass.draw(0..6, 0..instance_count);
             }
-            
+
             // Draw cursor overlay
             if self.cursor_state.is_visible() {
                 render_pass.set_pipeline(&self.cursor_pipeline);
@@ -537,26 +550,28 @@ impl Renderer {
 
             // Draw pane borders if we have multiple panes
             if viewports.len() > 1 {
-                log::trace!("Drawing {} pane borders", viewports.len());
+                log::trace!("Drawing {} pane borders with GPU shader", viewports.len());
                 self.render_pane_borders(&mut render_pass, viewports);
             }
         }
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 
         Ok(())
     }
 
-    /// Render pane borders (simple rectangles for now)
+    /// Render pane borders using GPU-accelerated shader
     fn render_pane_borders(&self, render_pass: &mut wgpu::RenderPass, viewports: &[PaneViewport]) {
-        // For now, just log that we would draw borders
-        // TODO: Implement actual border rendering with a shader
-        for viewport in viewports {
-            let color = if viewport.focused { "blue" } else { "gray" };
-            log::trace!("Pane {} at ({}, {}) {}x{} - {}", 
-                viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height, color);
+        if !self.border_renderer.has_borders() {
+            return;
         }
+
+        log::trace!("Rendering {} pane borders with GPU shader", viewports.len());
+        render_pass.set_pipeline(self.border_renderer.pipeline());
+        render_pass.set_bind_group(0, self.border_renderer.bind_group(), &[]);
+        let instance_count = self.border_renderer.instance_count();
+        render_pass.draw(0..6, 0..instance_count);
     }
 
     /// Render terminal content to texture (CPU-based for simplicity)
