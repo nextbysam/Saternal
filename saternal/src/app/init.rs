@@ -103,6 +103,8 @@ impl App {
 
         let window_clone = window.clone();
         let dropdown_clone = dropdown.clone();
+        let renderer_clone = renderer.clone();
+        let tab_manager_clone = tab_manager.clone();
         let hotkey_manager = HotkeyManager::new(move || {
             info!("Hotkey triggered!");
             let mut dropdown = dropdown_clone.lock();
@@ -113,12 +115,36 @@ impl App {
                         let ns_window: id = msg_send![ns_view, window];
                         
                         match dropdown.toggle(ns_window) {
-                            Ok(Some((width, height, scale_factor))) => {
-                                info!("Window repositioned: {}x{} at scale {:.2}x - waiting for OS resize events",
-                                      width, height, scale_factor);
-                                window_clone.request_redraw();
-                            }
-                            Ok(None) => {
+                            Ok(maybe_dimensions) => {
+                                // ALWAYS check actual window size when hotkey is pressed
+                                // The window size might have changed without toggle() detecting it
+                                let size = window_clone.inner_size();
+                                info!("Hotkey pressed - checking window size: {}x{}", size.width, size.height);
+
+                                if let Some(mut renderer_lock) = renderer_clone.try_lock() {
+                                    // CRITICAL: Update renderer dimensions first (like handle_resize)
+                                    // This ensures padding calculations use current window size
+                                    renderer_lock.resize(size.width, size.height);
+
+                                    let fm = renderer_lock.font_manager();
+                                    let effective_size = fm.effective_font_size();
+                                    let line_metrics = fm.font().horizontal_line_metrics(effective_size).unwrap();
+                                    let cell_width = fm.font().metrics('M', effective_size).advance_width;
+                                    let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+                                    let (cols, rows) = App::calculate_terminal_size(size.width, size.height, cell_width, cell_height);
+                                    info!("Resizing terminal to {}x{} for window {}x{}", cols, rows, size.width, size.height);
+                                    drop(renderer_lock);
+
+                                    if let Some(mut tab_mgr) = tab_manager_clone.try_lock() {
+                                        if let Some(active_tab) = tab_mgr.active_tab_mut() {
+                                            if let Err(e) = active_tab.resize(cols, rows) {
+                                                log::error!("Failed to resize terminal: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 window_clone.request_redraw();
                             }
                             Err(e) => {

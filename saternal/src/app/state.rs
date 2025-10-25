@@ -45,7 +45,7 @@ impl App {
         let cols = (available_width / cell_width).floor() as usize;
         let rows = (available_height / cell_height).floor() as usize;
         
-        // Ensure minimum dimensions
-        (cols.max(80), rows.max(24))
+        // Ensure minimum dimensions (just safety checks to prevent zero-size)
+        (cols.max(1), rows.max(1))
     }
 }
