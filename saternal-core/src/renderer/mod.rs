@@ -171,7 +171,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// Render a frame with pane tree (shows focused pane + borders)
-    pub fn render_with_panes<T>(&mut self, pane_tree: &PaneNode) -> Result<()> {
+    pub fn render_with_panes(&mut self, pane_tree: &PaneNode) -> Result<()> {
         // Get focused pane
         if let Some(focused_pane) = pane_tree.focused_pane() {
             // Render focused pane's terminal (reuse existing render logic)
