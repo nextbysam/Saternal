@@ -15,30 +15,33 @@ pub struct BorderRect {
 unsafe impl bytemuck::Pod for BorderRect {}
 unsafe impl bytemuck::Zeroable for BorderRect {}
 
-/// Padded viewport ID for proper alignment (must be 16-byte aligned in uniform buffers)
+/// Padded viewport ID for std140 uniform buffer array alignment
+/// In std140, struct arrays must have 32-byte stride when used in uniform buffers
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct ViewportId {
     pub id: u32,                  // Pane ID (4 bytes)
     pub _padding: [u32; 3],       // Padding to 16 bytes (12 bytes)
+    pub _padding2: [u32; 4],      // Additional padding to 32 bytes (16 bytes)
 }
 
 unsafe impl bytemuck::Pod for ViewportId {}
 unsafe impl bytemuck::Zeroable for ViewportId {}
 
-/// Border uniform data (matches shader layout)
+/// Border uniform data (matches shader layout with std140 alignment)
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct BorderUniforms {
-    pub rects: [BorderRect; 32],        // Up to 32 border rectangles (512 bytes)
-    pub count: u32,                      // Number of active borders (4 bytes)
-    pub thickness: f32,                  // Border thickness in pixels (4 bytes)
-    pub _padding1: [u32; 2],             // Padding (8 bytes)
-    pub active_color: [f32; 4],          // RGBA color for focused pane (16 bytes)
-    pub inactive_color: [f32; 4],        // RGBA color for unfocused panes (16 bytes)
-    pub viewport_ids: [ViewportId; 32],  // Pane IDs with padding (512 bytes)
-    pub focused_id: u32,                 // ID of focused pane (4 bytes)
-    pub _padding2: [u32; 3],             // Final padding (12 bytes)
+    pub rects: [BorderRect; 32],         // Up to 32 border rectangles (512 bytes)
+    pub _array_padding1: [u32; 4],       // Padding after array (16 bytes) - std140 requirement
+    pub count: u32,                       // Number of active borders (4 bytes)
+    pub thickness: f32,                   // Border thickness in pixels (4 bytes)
+    pub _padding1: [u32; 2],              // Padding (8 bytes)
+    pub active_color: [f32; 4],           // RGBA color for focused pane (16 bytes)
+    pub inactive_color: [f32; 4],         // RGBA color for unfocused panes (16 bytes)
+    pub viewport_ids: [ViewportId; 32],   // Pane IDs with 32-byte stride (1024 bytes)
+    pub focused_id: u32,                  // ID of focused pane (4 bytes)
+    pub _padding2: [u32; 3],              // Final padding (12 bytes)
 }
 
 unsafe impl bytemuck::Pod for BorderUniforms {}
@@ -95,12 +98,13 @@ impl BorderRenderer {
 
         let initial_uniforms = BorderUniforms {
             rects: [BorderRect { position: [0.0, 0.0], size: [0.0, 0.0] }; 32],
+            _array_padding1: [0, 0, 0, 0],
             count: 0,
             thickness: config.thickness as f32,
             _padding1: [0, 0],
             active_color: config.active_color,
             inactive_color: config.inactive_color,
-            viewport_ids: [ViewportId { id: 0, _padding: [0, 0, 0] }; 32],
+            viewport_ids: [ViewportId { id: 0, _padding: [0, 0, 0], _padding2: [0, 0, 0, 0] }; 32],
             focused_id: 0,
             _padding2: [0, 0, 0],
         };
@@ -164,7 +168,11 @@ impl BorderRenderer {
             for rect in rects {
                 if rect_index < 32 {
                     self.current_uniforms.rects[rect_index] = rect;
-                    self.current_uniforms.viewport_ids[rect_index] = viewport.pane_id as u32;
+                    self.current_uniforms.viewport_ids[rect_index] = ViewportId {
+                        id: viewport.pane_id as u32,
+                        _padding: [0, 0, 0],
+                        _padding2: [0, 0, 0, 0],
+                    };
                     rect_index += 1;
                 }
             }
