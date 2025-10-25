@@ -312,6 +312,87 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
+    /// Execute the GPU render pass with pane borders
+    fn execute_render_pass_with_borders(&mut self, viewports: &[PaneViewport]) -> Result<()> {
+        log::trace!("Getting surface texture for rendering...");
+        let frame = self.surface.get_current_texture()?;
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            // Draw terminal content
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..6, 0..1);
+            
+            // Draw selection highlights
+            if self.selection_renderer.has_selection() {
+                self.selection_renderer.upload_uniforms(&self.queue);
+                render_pass.set_pipeline(self.selection_renderer.pipeline());
+                render_pass.set_bind_group(0, self.selection_renderer.bind_group(), &[]);
+                let instance_count = self.selection_renderer.instance_count();
+                render_pass.draw(0..6, 0..instance_count);
+            }
+            
+            // Draw cursor overlay
+            if self.cursor_state.is_visible() {
+                render_pass.set_pipeline(&self.cursor_pipeline);
+                render_pass.set_bind_group(0, &self.cursor_state.bind_group, &[]);
+                render_pass.draw(0..6, 0..1);
+            }
+
+            // Draw pane borders if we have multiple panes
+            if viewports.len() > 1 {
+                log::trace!("Drawing {} pane borders", viewports.len());
+                self.render_pane_borders(&mut render_pass, viewports);
+            }
+        }
+        
+        self.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
+
+        Ok(())
+    }
+
+    /// Render pane borders (simple rectangles for now)
+    fn render_pane_borders(&self, render_pass: &mut wgpu::RenderPass, viewports: &[PaneViewport]) {
+        // For now, just log that we would draw borders
+        // TODO: Implement actual border rendering with a shader
+        for viewport in viewports {
+            let color = if viewport.focused { "blue" } else { "gray" };
+            log::trace!("Pane {} at ({}, {}) {}x{} - {}", 
+                viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height, color);
+        }
+    }
+
     /// Render terminal content to texture (CPU-based for simplicity)
     fn render_terminal_to_texture<T>(&mut self, term: &Term<T>) -> Result<()> {
         // Use text rasterizer to generate buffer

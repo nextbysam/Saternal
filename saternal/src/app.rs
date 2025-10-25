@@ -717,21 +717,22 @@ impl<'a> App<'a> {
                     event: WindowEvent::RedrawRequested,
                     ..
                 } => {
-                    // Render the frame with terminal content
+                    // Render the frame with pane tree
                     if let Some(mut renderer) = renderer.try_lock() {
-                        // Get the active terminal for rendering and history size
-                        let (term, history_size) = if let Some(tab_mgr) = tab_manager.try_lock() {
-                            if let Some(pane) = tab_mgr.active_tab()
-                                .and_then(|tab| tab.pane_tree.focused_pane()) 
-                            {
-                                let term_arc = pane.terminal.term();
-                                // Get history size from the terminal (it's available on Term, not Grid)
-                                let history_size = if let Some(term_lock) = term_arc.try_lock() {
-                                    term_lock.history_size()
+                        // Get the active tab's pane tree and history size
+                        let (pane_tree_opt, history_size) = if let Some(tab_mgr) = tab_manager.try_lock() {
+                            if let Some(tab) = tab_mgr.active_tab() {
+                                // Get history size from focused pane
+                                let history_size = if let Some(pane) = tab.pane_tree.focused_pane() {
+                                    if let Some(term_lock) = pane.terminal.term().try_lock() {
+                                        term_lock.history_size()
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     0
                                 };
-                                (Some(term_arc), history_size)
+                                (Some(&tab.pane_tree), history_size)
                             } else {
                                 (None, 0)
                             }
@@ -748,8 +749,11 @@ impl<'a> App<'a> {
                             window.set_title("Saternal");
                         }
                         
-                        if let Err(e) = renderer.render(term) {
-                            log::error!("Render error: {}", e);
+                        // Render with pane tree
+                        if let Some(pane_tree) = pane_tree_opt {
+                            if let Err(e) = renderer.render_with_panes(pane_tree) {
+                                log::error!("Render error: {}", e);
+                            }
                         }
                     }
                 }
