@@ -60,11 +60,13 @@ impl PaneNode {
         rows: usize,
         shell: Option<String>,
     ) -> Result<()> {
-        // Take ownership of self
+        // Take ownership of self without constructing a dummy pane
         let old_node = std::mem::replace(
             self,
-            PaneNode::Leaf {
-                pane: Pane::new(0, 1, 1, None)?,
+            PaneNode::Split {
+                direction,
+                children: Vec::new(),
+                ratio: 0.5,
             },
         );
 
@@ -72,12 +74,11 @@ impl PaneNode {
         let new_pane = Pane::new(new_id, cols, rows, shell)?;
         let new_node = PaneNode::Leaf { pane: new_pane };
 
-        // Create split with old and new nodes
-        *self = PaneNode::Split {
-            direction,
-            children: vec![old_node, new_node],
-            ratio: 0.5,
-        };
+        // Populate children with old and new nodes
+        if let PaneNode::Split { children, .. } = self {
+            children.push(old_node);
+            children.push(new_node);
+        }
 
         info!("Split pane in {:?} direction", direction);
         Ok(())
