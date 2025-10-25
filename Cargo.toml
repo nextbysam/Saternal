@@ -56,6 +56,7 @@ bytemuck = { version = "1.14", features = ["derive"] }
 # Phase 2 dependencies
 arboard = "3.3"  # Clipboard support
 regex = "1.10"   # Smart selection patterns
+rayon = "1.8"    # Parallel rendering
 
 [profile.release]
 opt-level = 3

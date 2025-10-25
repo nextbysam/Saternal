@@ -35,3 +35,6 @@ bytemuck.workspace = true
 # Phase 2 features
 arboard.workspace = true
 regex.workspace = true
+
+# Parallel rendering
+rayon.workspace = true

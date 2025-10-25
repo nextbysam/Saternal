@@ -1,7 +1,7 @@
 use alacritty_terminal::grid::Dimensions;
 use log::info;
 use parking_lot::Mutex;
-use saternal_core::{MouseButton, MouseState, Renderer, SelectionManager, SelectionMode};
+use saternal_core::{MouseButton, MouseState, Renderer, SelectionManager, SelectionMode, calculate_pane_viewports};
 use std::sync::Arc;
 use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta};
 
@@ -13,6 +13,7 @@ pub(super) fn handle_mouse_input(
     selection_manager: &mut SelectionManager,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
+    window: &winit::window::Window,
 ) {
     let mouse_button = match button {
         WinitMouseButton::Left => MouseButton::Left,
@@ -23,7 +24,7 @@ pub(super) fn handle_mouse_input(
 
     match state {
         ElementState::Pressed => {
-            handle_mouse_press(mouse_button, mouse_state, selection_manager, tab_manager, renderer);
+            handle_mouse_press(mouse_button, mouse_state, selection_manager, tab_manager, renderer, window);
         }
         ElementState::Released => {
             handle_mouse_release(mouse_button, mouse_state, selection_manager, tab_manager);
@@ -37,8 +38,53 @@ fn handle_mouse_press(
     selection_manager: &mut SelectionManager,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
+    window: &winit::window::Window,
 ) {
     mouse_state.press_button(mouse_button);
+    
+    // Check if click is on a different pane and focus it
+    if mouse_button == MouseButton::Left {
+        let mouse_x = mouse_state.position.column.0 as f32;
+        let mouse_y = mouse_state.position.line.0 as f32;
+        
+        if let Some(mut renderer_lock) = renderer.try_lock() {
+            let fm = renderer_lock.font_manager();
+            let effective_size = fm.effective_font_size();
+            let line_metrics = fm.font().horizontal_line_metrics(effective_size).unwrap();
+            let cell_width = fm.font().metrics('M', effective_size).advance_width;
+            let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+            
+            // Convert cell position to pixel position
+            let pixel_x = (mouse_x * cell_width + 10.0) as u32; // PADDING_LEFT
+            let pixel_y = (mouse_y * cell_height + 5.0) as u32; // PADDING_TOP
+            
+            drop(renderer_lock);
+            
+            // Check which pane viewport contains this click
+            if let Some(mut tab_mgr) = tab_manager.try_lock() {
+                if let Some(active_tab) = tab_mgr.active_tab_mut() {
+                    let viewports = calculate_pane_viewports(
+                        &active_tab.pane_tree,
+                        window.inner_size().width,
+                        window.inner_size().height
+                    );
+                    
+                    // Find which viewport was clicked
+                    for viewport in viewports {
+                        if pixel_x >= viewport.x && pixel_x < viewport.x + viewport.width &&
+                           pixel_y >= viewport.y && pixel_y < viewport.y + viewport.height {
+                            if !viewport.focused {
+                                info!("Focusing pane {} via mouse click", viewport.pane_id);
+                                active_tab.pane_tree.set_focus(viewport.pane_id);
+                                window.request_redraw();
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     if mouse_button != MouseButton::Left {
         return;

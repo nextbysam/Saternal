@@ -140,6 +140,27 @@ impl PaneNode {
         }
     }
 
+    /// Get all panes in the tree with their IDs
+    pub fn all_panes(&self) -> Vec<(usize, &Pane)> {
+        match self {
+            PaneNode::Leaf { pane } => vec![(pane.id, pane)],
+            PaneNode::Split { children, .. } => {
+                children.iter().flat_map(|c| c.all_panes()).collect()
+            }
+        }
+    }
+
+    /// Find a pane by ID
+    pub fn find_pane(&self, id: usize) -> Option<&Pane> {
+        match self {
+            PaneNode::Leaf { pane } if pane.id == id => Some(pane),
+            PaneNode::Leaf { .. } => None,
+            PaneNode::Split { children, .. } => {
+                children.iter().find_map(|child| child.find_pane(id))
+            }
+        }
+    }
+
     /// Split the currently focused pane
     pub fn split_focused(
         &mut self,

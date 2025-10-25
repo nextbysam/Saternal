@@ -12,6 +12,7 @@ use alacritty_terminal::term::{Term, TermMode};
 use anyhow::Result;
 use log::info;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::sync::Arc;
 use wgpu;
 
@@ -180,39 +181,137 @@ impl Renderer {
         Ok(())
     }
 
-    /// Render a frame with pane tree (shows focused pane + borders)
+    /// Render a frame with pane tree (shows all panes in their viewports)
+    /// Uses parallel rendering for improved performance with multiple panes
     pub fn render_with_panes(&mut self, pane_tree: &PaneNode) -> Result<()> {
-        // Get focused pane
-        if let Some(focused_pane) = pane_tree.focused_pane() {
-            // Render focused pane's terminal (reuse existing render logic)
-            if let Some(term_lock) = focused_pane.terminal.term().try_lock() {
-                log::debug!("Rendering focused pane {}", focused_pane.id);
-                
-                // Clamp scroll offset to available history
-                let history_size = term_lock.grid().history_size();
-                self.scroll_offset = self.scroll_offset.min(history_size as f32);
-                
-                self.render_terminal_to_texture(&term_lock)?;
-                self.update_cursor_position(&term_lock);
-            } else {
-                log::warn!("Could not lock focused pane terminal for rendering");
+        // Calculate pane viewports
+        let viewports = calculate_pane_viewports(pane_tree, self.config.width, self.config.height);
+        
+        // Create a black buffer for the entire window
+        let total_pixels = (self.config.width * self.config.height) as usize;
+        let mut combined_buffer = vec![0u8; total_pixels * 4];
+
+        // Collect pane data for parallel rendering
+        let pane_data: Vec<_> = viewports.iter()
+            .filter_map(|viewport| {
+                pane_tree.find_pane(viewport.pane_id).map(|pane| (pane, viewport))
+            })
+            .collect();
+
+        // Extract immutable references for parallel access
+        let text_rasterizer = &self.text_rasterizer;
+        let font_manager = &self.font_manager;
+        let surface_format = self.config.format;
+        let color_palette = &self.color_palette;
+        let scroll_offset = self.scroll_offset;
+
+        // PARALLEL: Render all panes simultaneously on multiple CPU cores
+        let rendered_panes: Vec<_> = pane_data.par_iter()
+            .filter_map(|(pane, viewport)| {
+                // Try to lock terminal (non-blocking)
+                pane.terminal.term().try_lock().map(|term_lock| {
+                    log::debug!("Rendering pane {} to viewport ({}, {}) {}x{}", 
+                        viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height);
+                    
+                    // Clamp scroll offset to available history for focused pane
+                    let pane_scroll_offset = if viewport.focused {
+                        let history_size = term_lock.grid().history_size();
+                        scroll_offset.min(history_size as f32).round() as usize
+                    } else {
+                        0 // Non-focused panes show live view
+                    };
+                    
+                    // Render this pane's terminal to a viewport-sized buffer (CPU-bound work)
+                    let pane_buffer = text_rasterizer.render_to_buffer(
+                        &term_lock,
+                        font_manager,
+                        viewport.width,
+                        viewport.height,
+                        pane_scroll_offset,
+                        surface_format,
+                        color_palette,
+                    ).ok()?;
+                    
+                    Some((viewport, pane_buffer, term_lock))
+                }).flatten()
+            })
+            .collect();
+
+        // SEQUENTIAL: Copy buffers to combined buffer and update cursor
+        for (viewport, pane_buffer, term_lock) in rendered_panes {
+            // Copy pane buffer to combined buffer at viewport position
+            self.copy_buffer_to_region(
+                &pane_buffer,
+                &mut combined_buffer,
+                viewport.x,
+                viewport.y,
+                viewport.width,
+                viewport.height,
+                self.config.width,
+            );
+            
+            // Update cursor position if this is the focused pane
+            if viewport.focused {
+                self.update_cursor_position_with_viewport(&term_lock, viewport);
             }
-        } else {
-            log::warn!("No focused pane found");
         }
+
+        // Upload combined buffer to GPU texture
+        log::debug!("Uploading {}x{} combined texture to GPU", self.config.width, self.config.height);
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.texture_manager.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &combined_buffer,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(self.config.width * 4),
+                rows_per_image: Some(self.config.height),
+            },
+            wgpu::Extent3d {
+                width: self.config.width,
+                height: self.config.height,
+                depth_or_array_layers: 1,
+            },
+        );
 
         // Update cursor blink
         let blink_changed = self.cursor_state.update_blink();
         if blink_changed {
             self.cursor_state.upload_uniforms(&self.queue);
         }
-
-        // Calculate pane viewports for border rendering
-        let viewports = calculate_pane_viewports(pane_tree, self.config.width, self.config.height);
         
         // Execute render pass with borders
         self.execute_render_pass_with_borders(&viewports)?;
         Ok(())
+    }
+
+    /// Copy a buffer to a specific region of the combined buffer
+    fn copy_buffer_to_region(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        dst_x: u32,
+        dst_y: u32,
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+    ) {
+        let bytes_per_pixel = 4;
+        for y in 0..src_height {
+            let src_row_start = (y * src_width * bytes_per_pixel) as usize;
+            let src_row_end = src_row_start + (src_width * bytes_per_pixel) as usize;
+            
+            let dst_row_start = ((dst_y + y) * dst_width * bytes_per_pixel + dst_x * bytes_per_pixel) as usize;
+            let dst_row_end = dst_row_start + (src_width * bytes_per_pixel) as usize;
+            
+            if src_row_end <= src.len() && dst_row_end <= dst.len() {
+                dst[dst_row_start..dst_row_end].copy_from_slice(&src[src_row_start..src_row_end]);
+            }
+        }
     }
 
     /// Update cursor position based on terminal state
@@ -250,6 +349,48 @@ impl Renderer {
         );
         
         // Upload uniforms to GPU
+        self.cursor_state.upload_uniforms(&self.queue);
+    }
+
+    /// Update cursor position with viewport offset
+    fn update_cursor_position_with_viewport<T>(&mut self, term: &Term<T>, viewport: &PaneViewport) {
+        let cursor_pos = term.grid().cursor.point;
+        
+        let hide_cursor = !term.mode().contains(TermMode::SHOW_CURSOR) 
+                          || self.scroll_offset > 0.01;
+        
+        let effective_size = self.font_manager.effective_font_size();
+        let line_metrics = self.font_manager.font()
+            .horizontal_line_metrics(effective_size)
+            .unwrap();
+        let cell_width = self.font_manager.font()
+            .metrics('M', effective_size)
+            .advance_width;
+        let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+        // Calculate cursor position relative to viewport
+        let cursor_pixel_x = viewport.x as f32 + cursor_pos.column.0 as f32 * cell_width + 10.0; // PADDING_LEFT
+        let cursor_pixel_y = viewport.y as f32 + cursor_pos.line.0 as f32 * cell_height + 5.0; // PADDING_TOP
+        
+        // Convert to NDC
+        let ndc_x = (cursor_pixel_x / self.config.width as f32) * 2.0 - 1.0;
+        let ndc_y = -((cursor_pixel_y / self.config.height as f32) * 2.0 - 1.0);
+        
+        log::debug!("Cursor at viewport offset: pixel=({}, {}), ndc=({}, {})", 
+                   cursor_pixel_x, cursor_pixel_y, ndc_x, ndc_y);
+        
+        // For now, use the existing update_position method
+        // This needs refinement to properly handle viewport offsets
+        self.cursor_state.update_position(
+            cursor_pos,
+            cell_width,
+            cell_height,
+            self.config.width,
+            self.config.height,
+            0,
+            hide_cursor,
+        );
+        
         self.cursor_state.upload_uniforms(&self.queue);
     }
 

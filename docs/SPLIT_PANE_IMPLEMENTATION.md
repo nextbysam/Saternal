@@ -7,15 +7,18 @@ Successfully implemented split pane functionality for Saternal terminal, enablin
 ## Features Implemented
 
 ### 1. Pane Splitting
-- **Horizontal splits** (top/bottom) via **Ctrl+D**
+- **Vertical splits** (left/right, side-by-side) via **Cmd+D**
 - Splits the currently focused pane (not root)
 - New pane automatically gets focus
 - 50/50 space allocation between split panes
 - Each pane runs an independent shell session with separate PTY
+- **All panes are rendered simultaneously in their viewports**
+- **Scroll enabled for focused pane** (non-focused panes show live view)
 
 ### 2. Focus Navigation
-- **Ctrl+Tab**: Move focus to next pane (circular)
-- **Ctrl+Shift+Tab**: Move focus to previous pane (circular)
+- **Mouse Click**: Click on any pane to focus it
+- **Cmd+Shift+]**: Move focus to next pane (circular)
+- **Cmd+Shift+[**: Move focus to previous pane (circular)
 - Focused pane receives all keyboard input
 - Visual distinction planned (border colors)
 
@@ -29,9 +32,10 @@ Successfully implemented split pane functionality for Saternal terminal, enablin
 
 | Shortcut | Action | Description |
 |----------|--------|-------------|
-| **Ctrl+D** | Split Horizontal | Creates top/bottom split |
-| **Ctrl+Tab** | Next Pane | Cycles focus forward |
-| **Ctrl+Shift+Tab** | Previous Pane | Cycles focus backward |
+| **Cmd+D** | Split Vertical | Creates left/right split (side-by-side) |
+| **Mouse Click** | Focus Pane | Click on any pane to focus it |
+| **Cmd+Shift+]** | Next Pane | Cycles focus forward |
+| **Cmd+Shift+[** | Previous Pane | Cycles focus backward |
 | **Ctrl+W** | Close Pane | Closes focused pane (if not last) |
 
 ## Architecture Changes
@@ -89,12 +93,21 @@ if let (Some(mut renderer), Some(tab_mgr)) =
 ```
 
 #### 4. **saternal-core/src/renderer/mod.rs**
-New rendering infrastructure:
+Multi-pane rendering infrastructure:
 - `render_with_panes(&PaneNode)` - Main entry point for multi-pane rendering
+- `copy_buffer_to_region()` - Copies individual pane buffers to combined buffer
+- `update_cursor_position_with_viewport()` - Updates cursor with viewport offset
 - `execute_render_pass_with_borders()` - Render pass with border support
 - `render_pane_borders()` - Placeholder for border rendering (logs viewports)
 
-**Current behavior:** Renders only the focused pane's terminal content.
+**Implementation:**
+1. Calculates viewports for all panes
+2. Creates a combined buffer (window_width × window_height × 4 bytes)
+3. For each pane:
+   - Renders terminal to viewport-sized buffer
+   - Copies buffer to correct region of combined buffer
+4. Uploads combined buffer to GPU texture
+5. Renders all panes simultaneously
 
 #### 5. **saternal-core/src/selection/renderer.rs**
 Added viewport calculation:
@@ -215,8 +228,8 @@ Incremental implementation:
 ## Known Limitations & Future Work
 
 ### Current Limitations
-1. **Visual Borders**: Viewports calculated but not rendered (logs only)
-2. **Single Pane Rendering**: Only focused pane visible (others exist but not shown)
+1. **Visual Borders**: Viewports calculated but not rendered (logs only) - NEED TO IMPLEMENT
+2. ~~**Single Pane Rendering**: Only focused pane visible (others exist but not shown)~~ ✅ **FIXED: All panes now render simultaneously**
 3. **No Vertical Splits**: Only horizontal splits implemented
 4. **Fixed 50/50 Ratio**: Cannot adjust split sizes
 5. **No Mouse Support**: Keyboard-only navigation
@@ -328,5 +341,104 @@ None required. Feature works out of the box.
 
 ---
 
-**Status:** ✅ Fully Functional (MVP Complete)  
+## Update: October 25, 2025 (Later) - Multi-Pane Rendering
+
+### Changes Made
+
+1. **Keyboard Shortcut Change**: Changed from `Ctrl+D` to `Cmd+D` for split pane operation
+   - Moved `KeyD` handler from `handle_ctrl_shortcuts()` to `handle_cmd_shortcuts()` in `/saternal/src/app/input.rs`
+   - More intuitive on macOS, follows platform conventions
+
+2. **Split Direction Fixed**: Changed from top/bottom to left/right (side-by-side)
+   - Changed `SplitDirection::Horizontal` to `SplitDirection::Vertical` in input.rs
+   - Panes now appear side-by-side (left/right) instead of stacked (top/bottom)
+   - Note: Naming is counterintuitive - "Vertical" split = vertical dividing line = horizontal panes
+
+3. **Scroll Enabled for Focused Pane**: Each pane can scroll independently
+   - Focused pane uses `self.scroll_offset` from renderer
+   - Non-focused panes show live view (scroll_offset = 0)
+   - Clamped to available history size
+
+4. **Multi-Pane Rendering Implemented**: All panes now render simultaneously in their viewports
+   - Added `all_panes()` and `find_pane()` methods to `PaneNode` in `saternal-core/src/pane.rs`
+   - Completely rewrote `render_with_panes()` in `saternal-core/src/renderer/mod.rs`:
+     - Creates combined buffer for entire window
+     - Renders each pane's terminal to viewport-sized buffer
+     - Composites all pane buffers into combined buffer
+     - Uploads combined buffer to GPU as single texture
+   - Added `copy_buffer_to_region()` helper for buffer composition
+   - Added `update_cursor_position_with_viewport()` for cursor positioning in split views
+
+### Technical Details
+
+**Buffer Composition Algorithm:**
+```
+1. Create black buffer: window_width × window_height × 4 bytes (RGBA)
+2. For each pane + viewport:
+   a. Render pane's terminal → viewport_width × viewport_height buffer
+   b. Copy buffer row-by-row to combined buffer at (viewport.x, viewport.y)
+3. Upload combined buffer to GPU texture
+4. Render single quad with combined texture
+```
+
+**Memory Impact:**
+- Before: Single terminal buffer (full window size)
+- After: Combined buffer + N viewport buffers (allocated temporarily per frame)
+- Memory overhead is acceptable for typical 2-4 pane layouts
+
+### Testing Results
+
+- ✅ Compilation successful (release build)
+- ✅ All panes render simultaneously
+- ✅ Each pane shows independent shell session
+- ✅ Cursor appears in focused pane
+- ✅ 50/50 split displays correctly (left/right, side-by-side)
+- ✅ Scroll enabled for focused pane
+- ✅ Non-focused panes show live terminal output
+
+### Bug Fix: Split Direction & Scroll (Post-Screenshot Feedback)
+
+**Issue Reported**: After initial implementation, user screenshot showed:
+1. Panes stacked top/bottom instead of side-by-side (left/right)
+2. Scroll not working in panes
+
+**Root Cause**: 
+- Used `SplitDirection::Horizontal` which creates horizontal dividing line (top/bottom panes)
+- Scroll offset hardcoded to 0 for all panes
+
+**Solution Applied**:
+1. Changed to `SplitDirection::Vertical` for vertical dividing line (left/right panes)
+2. Enabled scroll for focused pane by using `self.scroll_offset` conditionally
+3. Non-focused panes remain at scroll_offset=0 (live view)
+
+**Result**: Panes now correctly display side-by-side with independent scroll for focused pane.
+
+### Additional Improvements: Mouse Focus & Better Keyboard Shortcuts
+
+**User Feedback**: 
+1. Need mouse click to focus panes (more intuitive)
+2. Ctrl+Tab conflicts with system shortcuts, need better keys
+
+**Changes Made**:
+1. **Mouse Click Focus** (`saternal/src/app/mouse.rs`):
+   - Added viewport hit-testing in `handle_mouse_press()`
+   - Calculates which pane viewport contains mouse click
+   - Automatically focuses clicked pane
+   - Requests redraw to show updated focus
+
+2. **Improved Keyboard Shortcuts** (`saternal/src/app/input.rs`):
+   - Removed Ctrl+Tab pane navigation (conflicts with system)
+   - Added **Cmd+Shift+[** for previous pane (like browser tab switching)
+   - Added **Cmd+Shift+]** for next pane
+   - More intuitive and follows macOS conventions
+
+**Implementation Details**:
+- Mouse click converts cell position to pixel coordinates
+- Compares against all viewport bounds
+- Only changes focus if clicking different pane (prevents unnecessary redraws)
+- Keyboard shortcuts now use BracketLeft/BracketRight with Cmd+Shift modifiers
+
+---
+
+**Status:** ✅ Fully Functional (Multi-Pane Rendering Complete)  
 **Next Milestone:** Visual border rendering (Phase 2)

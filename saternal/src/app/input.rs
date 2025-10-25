@@ -36,12 +36,8 @@ pub(super) fn handle_keyboard_input(
         return handle_escape(search_state, selection_manager, renderer, tab_manager);
     }
 
-    // Handle Tab navigation
-    if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Tab)) {
-        if ctrl {
-            return handle_tab_navigation(shift, tab_manager, window);
-        }
-    }
+    // Pane navigation removed from Ctrl+Tab (conflicts with system shortcuts)
+    // Now handled by Cmd+Shift+[ and Cmd+Shift+] below
 
     // Handle Cmd shortcuts
     if cmd {
@@ -54,6 +50,7 @@ pub(super) fn handle_keyboard_input(
             config,
             font_size,
             renderer,
+            window,
         );
     }
 
@@ -91,18 +88,18 @@ fn handle_escape(
     false
 }
 
-fn handle_tab_navigation(
-    shift: bool,
+fn handle_pane_navigation(
+    previous: bool,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     window: &winit::window::Window,
 ) -> bool {
     if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
-        if shift {
+        if previous {
             active_tab.pane_tree.focus_prev();
-            info!("Focus moved to previous pane");
+            info!("Focus moved to previous pane (Cmd+Shift+[)");
         } else {
             active_tab.pane_tree.focus_next();
-            info!("Focus moved to next pane");
+            info!("Focus moved to next pane (Cmd+Shift+])");
         }
         window.request_redraw();
     }
@@ -118,6 +115,7 @@ fn handle_cmd_shortcuts(
     config: &mut Config,
     font_size: &mut f32,
     renderer: &Arc<Mutex<Renderer>>,
+    window: &winit::window::Window,
 ) -> bool {
     if let PhysicalKey::Code(keycode) = event.physical_key {
         match keycode {
@@ -136,6 +134,31 @@ fn handle_cmd_shortcuts(
             }
             KeyCode::KeyG => {
                 return handle_search_navigation(shift, search_state, tab_manager);
+            }
+            KeyCode::BracketLeft => {
+                // Cmd+Shift+[ - Navigate to previous pane
+                if shift {
+                    return handle_pane_navigation(true, tab_manager, window);
+                }
+            }
+            KeyCode::BracketRight => {
+                // Cmd+Shift+] - Navigate to next pane
+                if shift {
+                    return handle_pane_navigation(false, tab_manager, window);
+                }
+            }
+            KeyCode::KeyD => {
+                info!("Splitting pane vertically (Cmd+D) - side by side");
+                if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                    if let Err(e) = active_tab.split(
+                        SplitDirection::Vertical,
+                        Some(config.terminal.shell.clone())
+                    ) {
+                        log::error!("Failed to split pane: {}", e);
+                    }
+                }
+                window.request_redraw();
+                return true;
             }
             _ => {}
         }
@@ -237,19 +260,6 @@ fn handle_ctrl_shortcuts(
     window: &winit::window::Window,
 ) -> bool {
     match keycode {
-        KeyCode::KeyD => {
-            info!("Splitting pane horizontally");
-            if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
-                if let Err(e) = active_tab.split(
-                    SplitDirection::Horizontal,
-                    Some(config.terminal.shell.clone())
-                ) {
-                    log::error!("Failed to split pane: {}", e);
-                }
-            }
-            window.request_redraw();
-            true
-        }
         KeyCode::KeyW => {
             info!("Closing focused pane");
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {

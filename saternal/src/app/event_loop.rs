@@ -91,6 +91,7 @@ impl App {
                         &mut selection_manager,
                         &tab_manager,
                         &renderer,
+                        &window,
                     );
                     window.request_redraw();
                 }
