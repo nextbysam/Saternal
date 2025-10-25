@@ -6,6 +6,12 @@ struct BorderRect {
     size: vec2<f32>,          // NDC size (width, height)
 }
 
+// Padded viewport ID for proper alignment (must be 16-byte aligned in uniform buffers)
+struct ViewportId {
+    id: u32,                  // Pane ID (4 bytes)
+    _padding: vec3<u32>,      // Padding to 16 bytes (12 bytes)
+}
+
 struct BorderUniform {
     rects: array<BorderRect, 32>,      // Support up to 32 border rectangles (512 bytes)
     count: u32,                         // Number of active borders (4 bytes)
@@ -13,7 +19,7 @@ struct BorderUniform {
     _padding1: vec2<u32>,               // Padding to 16-byte boundary (8 bytes)
     active_color: vec4<f32>,            // RGBA color for focused pane (16 bytes)
     inactive_color: vec4<f32>,          // RGBA color for unfocused panes (16 bytes)
-    viewport_ids: array<u32, 32>,       // Pane IDs for each rect (128 bytes)
+    viewport_ids: array<ViewportId, 32>, // Pane IDs with padding (512 bytes)
     focused_id: u32,                    // ID of focused pane (4 bytes)
     _padding2: vec3<u32>,               // Final padding (12 bytes)
 }
@@ -42,7 +48,7 @@ fn vs_main(
 
     // Get the border rect for this instance
     let rect = borders.rects[instance_index];
-    let pane_id = borders.viewport_ids[instance_index];
+    let pane_id = borders.viewport_ids[instance_index].id;
 
     // Determine color based on focus state
     let is_focused = (pane_id == borders.focused_id);

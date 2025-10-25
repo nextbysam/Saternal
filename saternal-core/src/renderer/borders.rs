@@ -15,6 +15,17 @@ pub struct BorderRect {
 unsafe impl bytemuck::Pod for BorderRect {}
 unsafe impl bytemuck::Zeroable for BorderRect {}
 
+/// Padded viewport ID for proper alignment (must be 16-byte aligned in uniform buffers)
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct ViewportId {
+    pub id: u32,                  // Pane ID (4 bytes)
+    pub _padding: [u32; 3],       // Padding to 16 bytes (12 bytes)
+}
+
+unsafe impl bytemuck::Pod for ViewportId {}
+unsafe impl bytemuck::Zeroable for ViewportId {}
+
 /// Border uniform data (matches shader layout)
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -25,7 +36,7 @@ pub struct BorderUniforms {
     pub _padding1: [u32; 2],             // Padding (8 bytes)
     pub active_color: [f32; 4],          // RGBA color for focused pane (16 bytes)
     pub inactive_color: [f32; 4],        // RGBA color for unfocused panes (16 bytes)
-    pub viewport_ids: [u32; 32],         // Pane IDs (128 bytes)
+    pub viewport_ids: [ViewportId; 32],  // Pane IDs with padding (512 bytes)
     pub focused_id: u32,                 // ID of focused pane (4 bytes)
     pub _padding2: [u32; 3],             // Final padding (12 bytes)
 }
@@ -89,7 +100,7 @@ impl BorderRenderer {
             _padding1: [0, 0],
             active_color: config.active_color,
             inactive_color: config.inactive_color,
-            viewport_ids: [0; 32],
+            viewport_ids: [ViewportId { id: 0, _padding: [0, 0, 0] }; 32],
             focused_id: 0,
             _padding2: [0, 0, 0],
         };
@@ -290,6 +301,5 @@ fn create_border_pipeline(
             alpha_to_coverage_enabled: false,
         },
         multiview: None,
-        cache: None,
     })
 }

@@ -562,7 +562,7 @@ impl Renderer {
     }
 
     /// Render pane borders using GPU-accelerated shader
-    fn render_pane_borders(&self, render_pass: &mut wgpu::RenderPass, viewports: &[PaneViewport]) {
+    fn render_pane_borders<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, viewports: &[PaneViewport]) {
         if !self.border_renderer.has_borders() {
             return;
         }
