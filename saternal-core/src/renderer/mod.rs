@@ -29,11 +29,11 @@ use crate::pane::PaneNode;
 
 /// GPU-accelerated renderer using wgpu/Metal
 /// 
-/// Safety: The surface has a 'static lifetime. This is sound because:
-/// - The Window is owned by App and wrapped in Arc<Window>
-/// - The Renderer is also wrapped in Arc<Mutex<Renderer>>
-/// - Both Arcs are kept alive for the application's entire lifetime
-/// - When App is dropped, the Renderer is dropped before references to Window become invalid
+/// Safety: The Surface has a 'static lifetime, but is actually tied to the Window's lifetime.
+/// This is sound because:
+/// 1. We store Arc<Window> to keep the window alive
+/// 2. Rust drops struct fields in declaration order (top to bottom)
+/// 3. Therefore, surface drops before _window, preventing use-after-free
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -49,25 +49,25 @@ pub struct Renderer {
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
+    _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
 impl Renderer {
     /// Create a new renderer
     /// 
-    /// Safety: Takes a reference to Window and creates a Surface with 'static lifetime.
-    /// The caller must ensure the Window remains valid for the lifetime of the Renderer.
+    /// Takes Arc<Window> to ensure proper lifetime management through drop order guarantees.
     pub async fn new(
-        window: &winit::window::Window,
+        window: std::sync::Arc<winit::window::Window>,
         font_family: &str,
         font_size: f32,
         cursor_config: CursorConfig,
         color_palette: ColorPalette,
     ) -> Result<Self> {
         // Initialize GPU context
-        let gpu = GpuContext::new(window).await?;
+        let gpu = GpuContext::new(window.clone()).await?;
 
         // Get current DPI scale factor
-        let scale_factor = window.scale_factor();
+        let scale_factor = window.as_ref().scale_factor();
         let font_manager = FontManager::new_with_scale(font_family, font_size, scale_factor)?;
 
         // Calculate cell dimensions and baseline using effective font size
@@ -127,6 +127,7 @@ impl Renderer {
             cursor_pipeline,
             color_palette,
             selection_renderer,
+            _window: window, // Must be last to ensure correct drop order
         })
     }
 

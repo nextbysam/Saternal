@@ -67,7 +67,7 @@ pub(super) fn handle_redraw(
         if let Some(tab) = tab_mgr.active_tab() {
             let history_size = if let Some(pane) = tab.pane_tree.focused_pane() {
                 if let Some(term_lock) = pane.terminal.term().try_lock() {
-                    term_lock.history_size()
+                    term_lock.grid().history_size()
                 } else {
                     0
                 }

@@ -47,7 +47,7 @@ impl App {
         let dropdown = Arc::new(Mutex::new(dropdown));
 
         let mut renderer = Renderer::new(
-            &window,
+            window.clone(),
             &config.appearance.font_family,
             config.appearance.font_size,
             config.appearance.cursor,
