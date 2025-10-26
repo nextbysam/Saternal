@@ -28,22 +28,26 @@ impl App {
         let window = WindowBuilder::new()
             .with_title("Saternal")
             .with_decorations(false)
-            .with_transparent(false)
+            .with_transparent(true)
             .with_visible(false)
             .build(&event_loop)?;
 
         let window = Arc::new(window);
 
         let dropdown = DropdownWindow::new();
-        unsafe {
+        let (window_width, window_height, window_scale_factor) = unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
                     let ns_window: id = msg_send![ns_view, window];
-                    dropdown.configure_window(ns_window, ns_view, config.window.height_percentage)?;
+                    dropdown.configure_window(ns_window, ns_view, config.window.height_percentage)?
+                } else {
+                    return Err(anyhow::anyhow!("Failed to get AppKit window handle"));
                 }
+            } else {
+                return Err(anyhow::anyhow!("Failed to get window handle"));
             }
-        }
+        };
         let dropdown = Arc::new(Mutex::new(dropdown));
 
         let mut renderer = Renderer::new(
@@ -52,37 +56,47 @@ impl App {
             config.appearance.font_size,
             config.appearance.cursor,
             config.appearance.palette,
+            config.appearance.wallpaper_path.as_deref(),
+            config.appearance.wallpaper_opacity,
+            config.appearance.opacity,
         )
         .await?;
-        
-        if let Some(scale_override) = config.appearance.dpi_scale_override {
-            info!("Applying DPI scale override: {:.2}x", scale_override);
-            renderer.handle_scale_factor_changed(scale_override)?;
+
+        // Apply blur strength from config
+        renderer.set_blur_strength(config.appearance.blur_strength);
+
+        // Apply DPI scale from the window's screen (or override if configured)
+        let effective_scale = config.appearance.dpi_scale_override.unwrap_or(window_scale_factor);
+        if effective_scale != window.scale_factor() {
+            info!("Applying scale factor: {:.2}x (window reported: {:.2}x)",
+                  effective_scale, window.scale_factor());
+            renderer.handle_scale_factor_changed(effective_scale)?;
         }
         
-        let window_size = window.inner_size();
+        // Calculate terminal dimensions from the actual window dimensions (physical pixels)
+        let physical_size = window.inner_size();
         let effective_size = renderer.font_manager().effective_font_size();
         let line_metrics = renderer.font_manager().font().horizontal_line_metrics(effective_size).unwrap();
         let cell_width = renderer.font_manager().font().metrics('M', effective_size).advance_width;
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let (initial_cols, initial_rows) = Self::calculate_terminal_size(
-            window_size.width,
-            window_size.height,
+            physical_size.width,
+            physical_size.height,
             cell_width,
             cell_height
         );
-        info!("Calculated initial terminal size: {}x{} for window {}x{}",
-              initial_cols, initial_rows, window_size.width, window_size.height);
+        info!("Calculated initial terminal size: {}x{} for window {}x{} (scale: {:.2}x)",
+              initial_cols, initial_rows, physical_size.width, physical_size.height, effective_scale);
         
         let renderer = Arc::new(Mutex::new(renderer));
 
-        info!("Configuring Metal layer for rendering");
+        info!("Configuring Metal layer for rendering and backdrop blur");
         unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
-                    let ns_window: id = msg_send![ns_view, window];
-                    dropdown.lock().enable_vibrancy_layer(ns_window, ns_view)?;
+                    dropdown.lock().enable_vibrancy_layer(ns_view)?;
+
                 }
             }
         }
@@ -96,6 +110,8 @@ impl App {
 
         let window_clone = window.clone();
         let dropdown_clone = dropdown.clone();
+        let renderer_clone = renderer.clone();
+        let tab_manager_clone = tab_manager.clone();
         let hotkey_manager = HotkeyManager::new(move || {
             info!("Hotkey triggered!");
             let mut dropdown = dropdown_clone.lock();
@@ -106,12 +122,36 @@ impl App {
                         let ns_window: id = msg_send![ns_view, window];
                         
                         match dropdown.toggle(ns_window) {
-                            Ok(Some((width, height, scale_factor))) => {
-                                info!("Window repositioned: {}x{} at scale {:.2}x - waiting for OS resize events",
-                                      width, height, scale_factor);
-                                window_clone.request_redraw();
-                            }
-                            Ok(None) => {
+                            Ok(maybe_dimensions) => {
+                                // ALWAYS check actual window size when hotkey is pressed
+                                // The window size might have changed without toggle() detecting it
+                                let size = window_clone.inner_size();
+                                info!("Hotkey pressed - checking window size: {}x{}", size.width, size.height);
+
+                                if let Some(mut renderer_lock) = renderer_clone.try_lock() {
+                                    // CRITICAL: Update renderer dimensions first (like handle_resize)
+                                    // This ensures padding calculations use current window size
+                                    renderer_lock.resize(size.width, size.height);
+
+                                    let fm = renderer_lock.font_manager();
+                                    let effective_size = fm.effective_font_size();
+                                    let line_metrics = fm.font().horizontal_line_metrics(effective_size).unwrap();
+                                    let cell_width = fm.font().metrics('M', effective_size).advance_width;
+                                    let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+
+                                    let (cols, rows) = App::calculate_terminal_size(size.width, size.height, cell_width, cell_height);
+                                    info!("Resizing terminal to {}x{} for window {}x{}", cols, rows, size.width, size.height);
+                                    drop(renderer_lock);
+
+                                    if let Some(mut tab_mgr) = tab_manager_clone.try_lock() {
+                                        if let Some(active_tab) = tab_mgr.active_tab_mut() {
+                                            if let Err(e) = active_tab.resize(cols, rows) {
+                                                log::error!("Failed to resize terminal: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 window_clone.request_redraw();
                             }
                             Err(e) => {

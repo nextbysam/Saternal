@@ -49,7 +49,25 @@ pub struct AppearanceConfig {
     /// Useful for edge cases like VNC, VMs, or unusual display setups
     #[serde(default)]
     pub dpi_scale_override: Option<f64>,
+    /// Optional wallpaper image path
+    #[serde(default)]
+    pub wallpaper_path: Option<String>,
+    /// Wallpaper opacity (0.0-1.0, default: 0.3 for readability)
+    #[serde(default = "default_wallpaper_opacity")]
+    pub wallpaper_opacity: f32,
+    /// Blur strength (0.0 = no blur, 2.0 = default, 10.0 = heavy blur)
+    #[serde(default = "default_blur_strength")]
+    pub blur_strength: f32,
 }
+
+fn default_wallpaper_opacity() -> f32 {
+    0.3
+}
+
+fn default_blur_strength() -> f32 {
+    2.0
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConfig {
@@ -76,10 +94,13 @@ impl Default for Config {
                 palette: ColorPalette::default(),
                 font_family: "JetBrains Mono".to_string(),
                 font_size: 14.0,
-                opacity: 0.95,
+                opacity: 0.98,  // Increased from 0.95 for better visibility
                 blur: true,
                 cursor: CursorConfig::default(),
                 dpi_scale_override: None,
+                wallpaper_path: None,
+                wallpaper_opacity: 0.3,
+                blur_strength: 2.0,
             },
             terminal: TerminalConfig {
                 shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),

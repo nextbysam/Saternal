@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use saternal_core::{
     Clipboard, Config, Renderer, SearchState, SelectionManager, MouseState,
+    PADDING_LEFT, PADDING_TOP, PADDING_RIGHT, PADDING_BOTTOM, MIN_CELL_DIMENSION,
 };
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
@@ -24,15 +25,40 @@ pub struct App {
 
 impl App {
     /// Calculate terminal dimensions from window size
-    /// Returns (cols, rows) with padding at bottom to prevent text cutoff
+    /// Returns (cols, rows) accounting for padding to prevent text cutoff
+    ///
+    /// # Safety
+    /// Guards against division by zero by clamping cell dimensions to minimum values.
+    /// Returns (1, 1) as a safe fallback if cell dimensions are invalid.
     pub(super) fn calculate_terminal_size(
         window_width: u32,
         window_height: u32,
         cell_width: f32,
         cell_height: f32,
     ) -> (usize, usize) {
-        let cols = ((window_width as f32) / cell_width).floor() as usize;
-        let rows = (((window_height as f32) / cell_height).floor() - 1.0).max(24.0) as usize;
-        (cols.max(80), rows)
+        // Guard against invalid cell dimensions
+        if cell_width <= 0.0 || cell_height <= 0.0 {
+            log::warn!(
+                "Invalid cell dimensions: width={}, height={}. Returning minimal terminal size (1, 1)",
+                cell_width,
+                cell_height
+            );
+            return (1, 1);
+        }
+
+        // Clamp cell dimensions to prevent division by very small values
+        let cell_width = cell_width.max(MIN_CELL_DIMENSION);
+        let cell_height = cell_height.max(MIN_CELL_DIMENSION);
+
+        // Calculate available space after padding
+        let available_width = (window_width as f32 - PADDING_LEFT - PADDING_RIGHT).max(0.0);
+        let available_height = (window_height as f32 - PADDING_TOP - PADDING_BOTTOM).max(0.0);
+
+        // Calculate terminal dimensions from available space
+        let cols = (available_width / cell_width).floor() as usize;
+        let rows = (available_height / cell_height).floor() as usize;
+
+        // Ensure minimum dimensions (just safety checks to prevent zero-size)
+        (cols.max(1), rows.max(1))
     }
 }

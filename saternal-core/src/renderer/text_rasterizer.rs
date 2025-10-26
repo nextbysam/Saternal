@@ -1,3 +1,4 @@
+use crate::constants::{PADDING_LEFT, PADDING_TOP};
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
@@ -13,19 +14,18 @@ pub(crate) struct TextRasterizer {
     cell_width: f32,
     cell_height: f32,
     baseline_offset: f32,
-    padding_left: f32,
-    padding_top: f32,
 }
 
 impl TextRasterizer {
     /// Create a new text rasterizer with cell dimensions
+    ///
+    /// Padding values are sourced from shared constants to ensure they match
+    /// App::calculate_terminal_size() in saternal/src/app/state.rs
     pub fn new(cell_width: f32, cell_height: f32, baseline_offset: f32) -> Self {
         Self {
             cell_width,
             cell_height,
             baseline_offset,
-            padding_left: 10.0,
-            padding_top: 5.0,
         }
     }
 
@@ -34,7 +34,6 @@ impl TextRasterizer {
         self.cell_width = cell_width;
         self.cell_height = cell_height;
         self.baseline_offset = baseline_offset;
-        // Padding remains the same regardless of font size
     }
 
     /// Render terminal content to texture buffer
@@ -56,9 +55,6 @@ impl TextRasterizer {
         // The grid can access lines from -history_size to screen_lines-1
         let history_size = term.grid().history_size();
         let scroll_offset = scroll_offset.min(history_size);
-        
-        log::info!("Rendering terminal: {}x{} cells, cursor at ({}, {}), scroll_offset={}, history_size={}",
-                   cols, rows, cursor.column.0, cursor.line.0, scroll_offset, history_size);
 
         // Determine if we need BGRA or RGBA based on surface format
         let is_bgra = matches!(
@@ -66,8 +62,30 @@ impl TextRasterizer {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
 
-        // Create buffer for rendering terminal text
+        // Create buffer filled with background color (opaque)
+        // The wallpaper is rendered BEFORE this in a separate pass
+        let bg = palette.background;
+        let bg_r = (bg[0] * 255.0) as u8;
+        let bg_g = (bg[1] * 255.0) as u8;
+        let bg_b = (bg[2] * 255.0) as u8;
+        let bg_a = (bg[3] * 255.0) as u8;
+
         let mut buffer = vec![0u8; (width * height * 4) as usize];
+
+        // Fill buffer with background color
+        for pixel in buffer.chunks_exact_mut(4) {
+            if is_bgra {
+                pixel[0] = bg_b;
+                pixel[1] = bg_g;
+                pixel[2] = bg_r;
+                pixel[3] = bg_a;
+            } else {
+                pixel[0] = bg_r;
+                pixel[1] = bg_g;
+                pixel[2] = bg_b;
+                pixel[3] = bg_a;
+            }
+        }
 
         // Render each cell from the terminal grid
         let mut char_count = 0;
@@ -93,8 +111,8 @@ impl TextRasterizer {
                 let (metrics, bitmap) = font_manager.rasterize(c);
 
                 // Calculate cell position in window coordinates with padding
-                let cell_x = self.padding_left + col_idx as f32 * self.cell_width;
-                let cell_y = self.padding_top + row_idx as f32 * self.cell_height;
+                let cell_x = PADDING_LEFT + col_idx as f32 * self.cell_width;
+                let cell_y = PADDING_TOP + row_idx as f32 * self.cell_height;
 
                 // Calculate baseline position (from top of cell)
                 let baseline_y = cell_y + self.baseline_offset;
@@ -124,8 +142,6 @@ impl TextRasterizer {
                 );
             }
         }
-
-        log::info!("Rendered {} non-empty characters from terminal grid", char_count);
 
         Ok(buffer)
     }

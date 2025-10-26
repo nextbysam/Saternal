@@ -1,6 +1,7 @@
 use super::App;
 use anyhow::Result;
 use log::info;
+use std::sync::Arc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::ControlFlow,
@@ -13,11 +14,12 @@ impl App {
         let window = self.window.clone();
         let renderer = self.renderer.clone();
         let tab_manager = self.tab_manager.clone();
+        let dropdown = self.dropdown.clone();
         let hotkey_manager = self.hotkey_manager.clone();
         let mut font_size = self.font_size;
         let mut config = self.config.clone();
         let mut modifiers_state = winit::event::Modifiers::default();
-        
+
         let mut selection_manager = self.selection_manager;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
@@ -76,6 +78,7 @@ impl App {
                         &mut config,
                         &mut font_size,
                         &window,
+                        &dropdown,
                     );
                     window.request_redraw();
                 }
@@ -123,8 +126,11 @@ impl App {
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
                             match active_tab.process_output() {
-                                Ok(_) => {
-                                    window.request_redraw();
+                                Ok(bytes_processed) => {
+                                    // Only request redraw if there was actual output
+                                    if bytes_processed > 0 {
+                                        window.request_redraw();
+                                    }
                                 }
                                 Err(e) => {
                                     log::error!("Error processing output: {}", e);
@@ -146,6 +152,8 @@ impl App {
                 _ => {}
             }
         })?;
+
+        // Command buffer is now shared via Arc<Mutex<String>>, no need to save back
 
         Ok(())
     }

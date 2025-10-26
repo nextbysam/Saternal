@@ -20,15 +20,57 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 // Fragment shader
 
+// Group 0: Terminal content texture
 @group(0) @binding(0)
 var t_texture: texture_2d<f32>;
 
 @group(0) @binding(1)
 var t_sampler: sampler;
 
+// Group 1: Wallpaper texture
+@group(1) @binding(0)
+var wallpaper_texture: texture_2d<f32>;
+
+@group(1) @binding(1)
+var wallpaper_sampler: sampler;
+
+// Group 2: Opacity uniforms
+struct OpacityUniforms {
+    wallpaper_opacity: f32,
+    background_opacity: f32,
+    has_wallpaper: u32,
+    _padding: f32,
+}
+
+@group(2) @binding(0)
+var<uniform> opacity: OpacityUniforms;
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample the texture with terminal content
-    let color = textureSample(t_texture, t_sampler, input.tex_coords);
-    return color;
+    // Sample terminal content (text + background)
+    let terminal_color = textureSample(t_texture, t_sampler, input.tex_coords);
+
+    // If no wallpaper, just return terminal with applied opacity
+    if (opacity.has_wallpaper == 0u) {
+        return vec4<f32>(terminal_color.rgb * opacity.background_opacity, terminal_color.a * opacity.background_opacity);
+    }
+
+    // Sample wallpaper texture
+    let wallpaper_color = textureSample(wallpaper_texture, wallpaper_sampler, input.tex_coords);
+
+    // Apply wallpaper opacity (dim the wallpaper)
+    let wallpaper_dimmed = vec4<f32>(
+        wallpaper_color.rgb * opacity.wallpaper_opacity,
+        opacity.wallpaper_opacity
+    );
+
+    // Blend layers using premultiplied alpha:
+    // Layer compositing: wallpaper (bottom) → terminal content (top)
+    // Formula: result = foreground + background * (1 - foreground.a)
+    let blended = terminal_color + wallpaper_dimmed * (1.0 - terminal_color.a);
+
+    // Return blended result
+    // Note: We keep the terminal's alpha, not multiplying by background_opacity
+    // This ensures text remains visible
+    return blended;
 }

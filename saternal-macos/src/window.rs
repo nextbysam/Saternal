@@ -57,7 +57,8 @@ impl DropdownWindow {
 
     /// Configure a winit window to behave as a dropdown terminal
     /// ns_view is the winit NSView where wgpu will create the CAMetalLayer
-    pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<()> {
+    /// Returns (width, height, scale_factor) for terminal sizing
+    pub unsafe fn configure_window(&self, ns_window: id, ns_view: id, height_percentage: f64) -> Result<(u32, u32, f64)> {
         // Get screen containing mouse cursor (active screen)
         let screen = Self::get_screen_with_mouse();
         let screen_frame: NSRect = msg_send![screen, frame];
@@ -92,37 +93,41 @@ impl DropdownWindow {
         // but can receive key events when visible
         let () = msg_send![ns_window, setHidesOnDeactivate:NO];
 
-        // CRITICAL: Don't make window transparent - this prevents Metal from rendering
-        // The window needs to be opaque for the Metal layer to be visible
-        // We'll handle transparency through the rendering itself
-        let () = msg_send![ns_window, setOpaque:YES];
+        // CRITICAL: Set window to transparent for vibrancy/wallpaper to work
+        let () = msg_send![ns_window, setOpaque:NO];
 
-        // Set a black background so we can see if Metal is rendering
-        let black_color: id = msg_send![class!(NSColor), blackColor];
-        let () = msg_send![ns_window, setBackgroundColor:black_color];
+        // Set a clear background for transparency
+        let clear_color: id = msg_send![class!(NSColor), clearColor];
+        let () = msg_send![ns_window, setBackgroundColor:clear_color];
 
         // CRITICAL: Make the WINIT VIEW layer-backed BEFORE wgpu creates the surface
         // wgpu will add the CAMetalLayer to THIS view, not the window's contentView!
         let () = msg_send![ns_view, setWantsLayer:YES];
         info!("Set winit NSView to layer-backed mode");
 
-        info!("Configured dropdown window: {}x{} at ({}, {})",
-              window_width, window_height, window_x, window_y);
+        // Get the screen's scale factor for proper terminal sizing
+        let backing_scale_factor: f64 = msg_send![screen, backingScaleFactor];
 
-        Ok(())
+        // Convert from points to physical pixels
+        let physical_width = (window_width as f64 * backing_scale_factor).round() as u32;
+        let physical_height = (window_height as f64 * backing_scale_factor).round() as u32;
+
+        info!("Configured dropdown window: {}x{} at ({}, {}) with scale factor {:.2}x (physical: {}x{})",
+              window_width, window_height, window_x, window_y, backing_scale_factor, physical_width, physical_height);
+
+        Ok((physical_width, physical_height, backing_scale_factor))
     }
 
-    /// Enable vibrancy after wgpu surface is created
+    /// Enable transparency layer after wgpu surface is created
     /// Call this AFTER the renderer is initialized
-    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id) -> Result<()> {
-        // First, let's inspect and configure the Metal layer on the winit view
+    pub unsafe fn enable_vibrancy_layer(&self, ns_view: id) -> Result<()> {
+        // Configure the Metal layer for transparency
         self.configure_metal_layer(ns_view)?;
-        // Don't add vibrancy yet - let's just get Metal rendering working first
-        // self.enable_vibrancy(ns_window)
+        info!("✓ Transparency layer configured");
         Ok(())
     }
 
-    /// Configure the CAMetalLayer to be visible and opaque
+    /// Configure the CAMetalLayer for transparency
     /// ns_view is the winit NSView where wgpu adds the CAMetalLayer
     unsafe fn configure_metal_layer(&self, ns_view: id) -> Result<()> {
         // Get the layer from the WINIT VIEW (not the window's contentView!)
@@ -139,48 +144,16 @@ impl DropdownWindow {
             let class_str = std::ffi::CStr::from_ptr(class_name).to_str().unwrap_or("unknown");
             info!("Layer class: {}", class_str);
 
-            // Make sure layer is opaque
-            let () = msg_send![layer, setOpaque:YES];
+            // CRITICAL: Set layer to transparent for blur/wallpaper to work
+            let () = msg_send![layer, setOpaque:NO];
 
             // Ensure it's not hidden
             let () = msg_send![layer, setHidden:NO];
 
-            info!("Layer configured: opaque=YES, hidden=NO");
+            info!("Layer configured: opaque=NO (transparent), hidden=NO");
         } else {
             info!("WARNING: No layer found on winit NSView! wgpu may not have created it yet.");
         }
-
-        Ok(())
-    }
-
-    /// Enable vibrancy (background blur) effect
-    unsafe fn enable_vibrancy(&self, ns_window: id) -> Result<()> {
-        // Create NSVisualEffectView for background blur
-        let content_view: id = msg_send![ns_window, contentView];
-
-        // NSVisualEffectView with dark appearance
-        let visual_effect_class = class!(NSVisualEffectView);
-        let visual_effect_view: id = msg_send![visual_effect_class, alloc];
-        let frame: NSRect = msg_send![content_view, bounds];
-        let visual_effect_view: id = msg_send![visual_effect_view, initWithFrame:frame];
-
-        // NSVisualEffectBlendingModeBehindWindow = 0
-        let blending_mode: i64 = 0;
-        let () = msg_send![visual_effect_view, setBlendingMode:blending_mode];
-
-        // NSVisualEffectMaterialDark = 2
-        let material: i64 = 2;
-        let () = msg_send![visual_effect_view, setMaterial:material];
-
-        // Set state to active
-        let () = msg_send![visual_effect_view, setState:1i64]; // NSVisualEffectStateActive = 1
-
-        // Set autoresizing mask
-        let () = msg_send![visual_effect_view, setAutoresizingMask:0x12]; // Width + Height sizable
-
-        // CRITICAL: Insert at index 0 (bottom of the view hierarchy) so wgpu's Metal layer renders on top
-        // Using addSubview:positioned:relativeTo: with NSWindowBelow (-1)
-        let () = msg_send![content_view, addSubview:visual_effect_view positioned:(-1i64) relativeTo:nil];
 
         Ok(())
     }

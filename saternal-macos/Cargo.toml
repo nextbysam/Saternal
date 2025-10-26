@@ -15,6 +15,9 @@ core-graphics.workspace = true
 # Global hotkey
 global-hotkey.workspace = true
 
+# Window management
+winit.workspace = true
+
 # Utilities
 log.workspace = true
 anyhow.workspace = true

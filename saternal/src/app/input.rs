@@ -1,9 +1,12 @@
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::Column;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{
     Config, InputModifiers, Renderer, SearchState, SelectionManager, SplitDirection,
     is_jump_to_bottom, key_to_bytes,
 };
+use saternal_macos::DropdownWindow;
 use std::sync::Arc;
 use winit::{
     event::{ElementState, KeyEvent, Modifiers},
@@ -22,6 +25,7 @@ pub(super) fn handle_keyboard_input(
     config: &mut Config,
     font_size: &mut f32,
     window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -64,7 +68,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown)
 }
 
 fn handle_escape(
@@ -124,7 +128,7 @@ fn handle_cmd_shortcuts(
                 return true;
             }
             KeyCode::KeyV => {
-                super::clipboard::handle_paste(tab_manager);
+                super::clipboard::handle_paste(tab_manager, renderer, window);
                 return true;
             }
             KeyCode::KeyF => {
@@ -256,7 +260,7 @@ fn update_font_size(config: &mut Config, font_size: f32, renderer: &Arc<Mutex<Re
 fn handle_ctrl_shortcuts(
     keycode: KeyCode,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
-    config: &Config,
+    _config: &Config,
     window: &winit::window::Window,
 ) -> bool {
     match keycode {
@@ -274,12 +278,47 @@ fn handle_ctrl_shortcuts(
     }
 }
 
+/// Fast inline function to read the current line from terminal grid
+#[inline]
+fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) -> Option<String> {
+    let tab_mgr = tab_manager.lock();
+    let active_tab = tab_mgr.active_tab()?;
+    let pane = active_tab.pane_tree.focused_pane()?;
+
+    // Extend lifetime by binding the Arc first
+    let term_arc = pane.terminal.term();
+    let term_lock = term_arc.try_lock()?;
+
+    let grid = term_lock.grid();
+    let cursor_line = grid.cursor.point.line;
+
+    // Pre-allocate with reasonable capacity (most commands < 256 chars)
+    let mut line = String::with_capacity(256);
+
+    // Fast iteration over grid cells - zero-copy char extraction
+    let num_cols = grid.columns();
+    for col_idx in 0..num_cols {
+        let column = Column(col_idx);
+        let cell = &grid[cursor_line][column];
+        let ch = cell.c;
+
+        // Early termination on null/empty
+        if ch == '\0' || ch == ' ' && line.is_empty() {
+            continue;
+        }
+        line.push(ch);
+    }
+
+    Some(line.trim_end().to_string())
+}
+
 fn handle_terminal_input(
     event: &KeyEvent,
     modifiers_state: &Modifiers,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -296,9 +335,39 @@ fn handle_terminal_input(
     // Try to convert key to terminal bytes
     if let PhysicalKey::Code(keycode) = event.physical_key {
         if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
+            // Check for Enter key - intercept to detect commands
+            if bytes == b"\r" || bytes == b"\n" {
+                // Read current line from grid (captures typed + autocompleted + pasted text)
+                if let Some(line) = read_current_line_from_grid(tab_manager) {
+                    log::debug!("Enter pressed - checking for command (line length: {})", line.len());
+
+                    // Check if it's a terminal command
+                    if let Some(cmd) = crate::app::commands::parse_command(&line) {
+                        let cmd_name = get_command_name(&cmd);
+                        log::info!("✓ Command detected: {}", cmd_name);
+
+                        // Execute command
+                        let success = execute_command(cmd, renderer, window, dropdown);
+
+                        if success {
+                            log::info!("✓ Command executed successfully");
+                            // Don't pass Enter to shell - command was consumed
+                            return true;
+                        } else {
+                            log::warn!("⚠️ Command execution failed");
+                            return true;
+                        }
+                    }
+                }
+                // Not a command - fall through to pass Enter to terminal
+            }
+
+            // Pass to terminal (including Enter if not a command)
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(&bytes);
             }
+            renderer.lock().reset_scroll();
+            window.request_redraw();
             return true;
         }
     }
@@ -306,11 +375,65 @@ fn handle_terminal_input(
     // Handle regular text input
     if !input_mods.ctrl && !input_mods.alt {
         if let Some(text) = &event.text {
+            // Pass to terminal
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(text.as_bytes());
             }
+            renderer.lock().reset_scroll();
+            window.request_redraw();
         }
     }
 
     false
+}
+
+/// Get sanitized command name without user data
+fn get_command_name(cmd: &crate::app::commands::TerminalCommand) -> &'static str {
+    use crate::app::commands::TerminalCommand;
+    match cmd {
+        TerminalCommand::Wallpaper { .. } => "Wallpaper",
+        TerminalCommand::WallpaperOpacity { .. } => "WallpaperOpacity",
+        TerminalCommand::BackgroundOpacity { .. } => "BackgroundOpacity",
+        TerminalCommand::BlurStrength { .. } => "BlurStrength",
+    }
+}
+
+/// Execute a terminal command
+fn execute_command(
+    cmd: crate::app::commands::TerminalCommand,
+    renderer: &Arc<Mutex<Renderer>>,
+    window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
+) -> bool {
+    use crate::app::commands::TerminalCommand;
+
+    let result = match &cmd {
+        TerminalCommand::Wallpaper { path } => {
+            renderer.lock().set_wallpaper(path.as_deref())
+        }
+        TerminalCommand::WallpaperOpacity { opacity } => {
+            renderer.lock().set_wallpaper_opacity(*opacity);
+            Ok(())
+        }
+        TerminalCommand::BackgroundOpacity { opacity } => {
+            renderer.lock().set_background_opacity(*opacity);
+            Ok(())
+        }
+        TerminalCommand::BlurStrength { strength } => {
+            renderer.lock().set_blur_strength(*strength);
+            Ok(())
+        }
+    };
+
+    let success = result.is_ok();
+    let _message = match result {
+        Ok(_) => crate::app::commands::format_success_message(&cmd),
+        Err(e) => crate::app::commands::format_error_message(&cmd, &e.to_string()),
+    };
+
+    // Note: In a real implementation, we'd display the message in the terminal
+    // For now, the log messages in the renderer are sufficient
+
+    window.request_redraw();
+    success
 }

@@ -1,9 +1,10 @@
-mod state;
+mod clipboard;
+pub(crate) mod commands;
+mod event_loop;
 mod init;
 mod input;
 mod mouse;
+mod state;
 mod window;
-mod clipboard;
-mod event_loop;
 
 pub use state::App;

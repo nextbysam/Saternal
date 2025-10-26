@@ -38,3 +38,6 @@ regex.workspace = true
 
 # Parallel rendering
 rayon.workspace = true
+
+# Image loading
+image.workspace = true

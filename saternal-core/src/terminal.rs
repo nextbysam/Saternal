@@ -115,7 +115,8 @@ impl Terminal {
     }
 
     /// Read output from the terminal and process it
-    pub fn process_output(&mut self) -> Result<()> {
+    /// Returns the number of bytes processed
+    pub fn process_output(&mut self) -> Result<usize> {
         use std::io::Read;
 
         let mut buf = [0u8; 4096];
@@ -136,12 +137,8 @@ impl Terminal {
                 }
             }
         }
-        
-        if total_bytes > 0 {
-            info!("Processed {} bytes total from shell", total_bytes);
-        }
 
-        Ok(())
+        Ok(total_bytes)
     }
 
     /// Get grid dimensions

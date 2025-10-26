@@ -1,10 +1,13 @@
+mod borders;
 mod color;
 pub mod cursor;
 mod gpu;
+mod opacity;
 mod pipeline;
 mod text_rasterizer;
 mod texture;
 pub mod theme;
+mod wallpaper;
 
 use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
@@ -16,12 +19,15 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use wgpu;
 
+use borders::BorderRenderer;
 use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
 use gpu::GpuContext;
+use opacity::OpacityUniforms;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
+use wallpaper::WallpaperManager;
 use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
 use crate::pane::PaneNode;
 
@@ -50,12 +56,15 @@ pub struct Renderer {
     cursor_pipeline: wgpu::RenderPipeline,
     color_palette: ColorPalette,
     selection_renderer: SelectionRenderer,
+    border_renderer: BorderRenderer,
+    wallpaper_manager: WallpaperManager,
+    opacity_uniforms: OpacityUniforms,
     _window: std::sync::Arc<winit::window::Window>, // Keep window alive - must be last for drop order
 }
 
 impl Renderer {
     /// Create a new renderer
-    /// 
+    ///
     /// Takes Arc<Window> to ensure proper lifetime management through drop order guarantees.
     pub async fn new(
         window: std::sync::Arc<winit::window::Window>,
@@ -63,6 +72,9 @@ impl Renderer {
         font_size: f32,
         cursor_config: CursorConfig,
         color_palette: ColorPalette,
+        wallpaper_path: Option<&str>,
+        wallpaper_opacity: f32,
+        background_opacity: f32,
     ) -> Result<Self> {
         // Initialize GPU context
         let gpu = GpuContext::new(window.clone()).await?;
@@ -92,10 +104,37 @@ impl Renderer {
             gpu.config.format,
         );
 
-        // Create render pipeline
+        // Create wallpaper manager
+        let mut wallpaper_manager = WallpaperManager::new(&gpu.device);
+
+        // Load wallpaper if path provided
+        if let Some(path) = wallpaper_path {
+            log::info!("Attempting to load wallpaper from: {}", path);
+            match wallpaper_manager.load(&gpu.device, &gpu.queue, path) {
+                Ok(_) => log::info!("✓ Wallpaper loaded successfully: {}", path),
+                Err(e) => log::error!("✗ WALLPAPER LOADING FAILED: {} - Error: {}", path, e),
+            }
+        } else {
+            log::info!("No wallpaper path configured");
+        }
+
+        // Create opacity uniforms
+        let has_wallpaper = wallpaper_manager.has_wallpaper();
+        log::info!("Initializing opacity uniforms: wallpaper_opacity={}, background_opacity={}, has_wallpaper={}",
+                   wallpaper_opacity, background_opacity, has_wallpaper);
+        let opacity_uniforms = OpacityUniforms::new(
+            &gpu.device,
+            wallpaper_opacity,
+            background_opacity,
+            has_wallpaper,
+        );
+
+        // Create render pipeline with all bind group layouts
         let render_pipeline = create_render_pipeline(
             &gpu.device,
             &texture_manager.bind_group_layout,
+            wallpaper_manager.bind_group_layout(),
+            opacity_uniforms.bind_group_layout(),
             gpu.config.format,
         );
 
@@ -113,6 +152,9 @@ impl Renderer {
         // Create selection renderer
         let selection_renderer = SelectionRenderer::new(&gpu.device, gpu.config.format);
 
+        // Create border renderer
+        let border_renderer = BorderRenderer::new(&gpu.device, gpu.config.format);
+
         Ok(Self {
             device: gpu.device,
             queue: gpu.queue,
@@ -128,6 +170,9 @@ impl Renderer {
             cursor_pipeline,
             color_palette,
             selection_renderer,
+            border_renderer,
+            wallpaper_manager,
+            opacity_uniforms,
             _window: window, // Must be last to ensure correct drop order
         })
     }
@@ -435,7 +480,7 @@ impl Renderer {
                             r: 0.0,
                             g: 0.0,
                             b: 0.0,
-                            a: 1.0,
+                            a: 0.0,  // Transparent clear for window transparency
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -448,6 +493,8 @@ impl Renderer {
             log::trace!("Setting pipeline and drawing quad...");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_bind_group(1, self.wallpaper_manager.bind_group(), &[]);
+            render_pass.set_bind_group(2, self.opacity_uniforms.bind_group(), &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             log::trace!("Drawing 6 vertices for fullscreen quad");
             render_pass.draw(0..6, 0..1);
@@ -480,6 +527,12 @@ impl Renderer {
 
     /// Execute the GPU render pass with pane borders
     fn execute_render_pass_with_borders(&mut self, viewports: &[PaneViewport]) -> Result<()> {
+        // Update border renderer with current viewports
+        if viewports.len() > 1 {
+            self.border_renderer.update(viewports, self.config.width, self.config.height);
+            self.border_renderer.upload_uniforms(&self.queue);
+        }
+
         log::trace!("Getting surface texture for rendering...");
         let frame = self.surface.get_current_texture()?;
         let view = frame
@@ -503,7 +556,7 @@ impl Renderer {
                             r: 0.0,
                             g: 0.0,
                             b: 0.0,
-                            a: 1.0,
+                            a: 0.0,  // Transparent clear for window transparency
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -516,9 +569,11 @@ impl Renderer {
             // Draw terminal content
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
+            render_pass.set_bind_group(1, self.wallpaper_manager.bind_group(), &[]);
+            render_pass.set_bind_group(2, self.opacity_uniforms.bind_group(), &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
-            
+
             // Draw selection highlights
             if self.selection_renderer.has_selection() {
                 self.selection_renderer.upload_uniforms(&self.queue);
@@ -527,7 +582,7 @@ impl Renderer {
                 let instance_count = self.selection_renderer.instance_count();
                 render_pass.draw(0..6, 0..instance_count);
             }
-            
+
             // Draw cursor overlay
             if self.cursor_state.is_visible() {
                 render_pass.set_pipeline(&self.cursor_pipeline);
@@ -537,26 +592,28 @@ impl Renderer {
 
             // Draw pane borders if we have multiple panes
             if viewports.len() > 1 {
-                log::trace!("Drawing {} pane borders", viewports.len());
+                log::trace!("Drawing {} pane borders with GPU shader", viewports.len());
                 self.render_pane_borders(&mut render_pass, viewports);
             }
         }
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 
         Ok(())
     }
 
-    /// Render pane borders (simple rectangles for now)
-    fn render_pane_borders(&self, render_pass: &mut wgpu::RenderPass, viewports: &[PaneViewport]) {
-        // For now, just log that we would draw borders
-        // TODO: Implement actual border rendering with a shader
-        for viewport in viewports {
-            let color = if viewport.focused { "blue" } else { "gray" };
-            log::trace!("Pane {} at ({}, {}) {}x{} - {}", 
-                viewport.pane_id, viewport.x, viewport.y, viewport.width, viewport.height, color);
+    /// Render pane borders using GPU-accelerated shader
+    fn render_pane_borders<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, viewports: &[PaneViewport]) {
+        if !self.border_renderer.has_borders() {
+            return;
         }
+
+        log::trace!("Rendering {} pane borders with GPU shader", viewports.len());
+        render_pass.set_pipeline(self.border_renderer.pipeline());
+        render_pass.set_bind_group(0, self.border_renderer.bind_group(), &[]);
+        let instance_count = self.border_renderer.instance_count();
+        render_pass.draw(0..6, 0..instance_count);
     }
 
     /// Render terminal content to texture (CPU-based for simplicity)
@@ -601,15 +658,15 @@ impl Renderer {
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             info!("Resizing renderer to {}x{}", width, height);
-            
+
             // Update surface configuration
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            
+
             // Resize texture manager
             self.texture_manager.resize(&self.device, width, height, self.config.format);
-            
+
             info!("Renderer resized successfully");
         }
     }
@@ -683,9 +740,64 @@ impl Renderer {
         // Update text rasterizer
         self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
         
-        info!("DPI updated: effective font size={}, cell={}x{}", 
+        info!("DPI updated: effective font size={}, cell={}x{}",
               effective_size, cell_width, cell_height);
-        
+
         Ok(())
+    }
+
+    /// Set or clear wallpaper
+    pub fn set_wallpaper(&mut self, path: Option<&str>) -> Result<()> {
+        match path {
+            Some(p) => {
+                info!("Setting wallpaper: {}", p);
+                self.wallpaper_manager.load(&self.device, &self.queue, p)?;
+            }
+            None => {
+                info!("Clearing wallpaper");
+                self.wallpaper_manager.clear(&self.device);
+            }
+        }
+
+        // Update opacity uniforms with new wallpaper status
+        self.opacity_uniforms.update(
+            &self.queue,
+            self.opacity_uniforms.wallpaper_opacity(),
+            self.opacity_uniforms.background_opacity(),
+            self.wallpaper_manager.has_wallpaper(),
+        );
+
+        Ok(())
+    }
+
+    /// Set wallpaper opacity
+    pub fn set_wallpaper_opacity(&mut self, opacity: f32) {
+        info!("Setting wallpaper opacity: {}", opacity);
+        self.opacity_uniforms.update(
+            &self.queue,
+            opacity,
+            self.opacity_uniforms.background_opacity(),
+            self.wallpaper_manager.has_wallpaper(),
+        );
+    }
+
+    /// Set background opacity
+    pub fn set_background_opacity(&mut self, opacity: f32) {
+        info!("Setting background opacity: {}", opacity);
+        self.opacity_uniforms.update(
+            &self.queue,
+            self.opacity_uniforms.wallpaper_opacity(),
+            opacity,
+            self.wallpaper_manager.has_wallpaper(),
+        );
+    }
+
+    /// Set blur strength (0.0 = disabled, 2.0 = default, 10.0 = heavy)
+    /// Applies CPU-based blur to the wallpaper image
+    pub fn set_blur_strength(&mut self, strength: f32) {
+        info!("Setting blur strength: {}", strength);
+        if let Err(e) = self.wallpaper_manager.set_blur_strength(&self.device, &self.queue, strength) {
+            log::error!("Failed to apply blur: {}", e);
+        }
     }
 }
