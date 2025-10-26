@@ -1,16 +1,18 @@
-/// Terminal commands for runtime wallpaper and opacity control
+/// Terminal commands for runtime wallpaper, opacity, and blur control
 ///
 /// Supports:
 /// - `wallpaper <path>` - Set wallpaper image
 /// - `wallpaper clear` - Remove wallpaper
 /// - `wallpaper-opacity <value>` - Set wallpaper opacity (0.0-1.0)
 /// - `background-opacity <value>` - Set background opacity (0.0-1.0)
+/// - `blur-strength <value>` - Set blur strength (0.0-10.0, 0.0 = disabled)
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TerminalCommand {
     Wallpaper { path: Option<String> },
     WallpaperOpacity { opacity: f32 },
     BackgroundOpacity { opacity: f32 },
+    BlurStrength { strength: f32 },
 }
 
 /// Parse a command from terminal input
@@ -72,6 +74,22 @@ pub fn parse_command(line: &str) -> Option<TerminalCommand> {
             }
         } else {
             log::warn!("Invalid opacity value: {}", arg);
+            return None;
+        }
+    }
+
+    // Blur strength command - find anywhere in line
+    if let Some(pos) = line.find("blur-strength ") {
+        let arg = line[pos + 14..].trim();
+        if let Ok(strength) = arg.parse::<f32>() {
+            if (0.0..=10.0).contains(&strength) {
+                return Some(TerminalCommand::BlurStrength { strength });
+            } else {
+                log::warn!("Blur strength must be between 0.0 and 10.0, got: {}", strength);
+                return None;
+            }
+        } else {
+            log::warn!("Invalid blur strength value: {}", arg);
             return None;
         }
     }
@@ -147,6 +165,13 @@ pub fn format_success_message(cmd: &TerminalCommand) -> String {
         TerminalCommand::BackgroundOpacity { opacity } => {
             format!("✓ Background opacity set to {:.1}%", opacity * 100.0)
         }
+        TerminalCommand::BlurStrength { strength } => {
+            if *strength == 0.0 {
+                "✓ Blur disabled".to_string()
+            } else {
+                format!("✓ Blur strength set to {:.1}", strength)
+            }
+        }
     }
 }
 
@@ -164,6 +189,9 @@ pub fn format_error_message(cmd: &TerminalCommand, error: &str) -> String {
         }
         TerminalCommand::BackgroundOpacity { .. } => {
             format!("✗ Failed to set background opacity: {}", error)
+        }
+        TerminalCommand::BlurStrength { .. } => {
+            format!("✗ Failed to set blur strength: {}", error)
         }
     }
 }

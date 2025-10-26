@@ -55,10 +55,17 @@ pub struct AppearanceConfig {
     /// Wallpaper opacity (0.0-1.0, default: 0.3 for readability)
     #[serde(default = "default_wallpaper_opacity")]
     pub wallpaper_opacity: f32,
+    /// Blur strength (0.0 = no blur, 2.0 = default, 10.0 = heavy blur)
+    #[serde(default = "default_blur_strength")]
+    pub blur_strength: f32,
 }
 
 fn default_wallpaper_opacity() -> f32 {
     0.3
+}
+
+fn default_blur_strength() -> f32 {
+    2.0
 }
 
 
@@ -93,6 +100,7 @@ impl Default for Config {
                 dpi_scale_override: None,
                 wallpaper_path: None,
                 wallpaper_opacity: 0.3,
+                blur_strength: 2.0,
             },
             terminal: TerminalConfig {
                 shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),

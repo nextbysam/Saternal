@@ -62,8 +62,8 @@ impl TextRasterizer {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
         );
 
-        // Create buffer filled with background color (not transparent)
-        // This ensures empty areas have the terminal background color, not full transparency
+        // Create buffer filled with background color (opaque)
+        // The wallpaper is rendered BEFORE this in a separate pass
         let bg = palette.background;
         let bg_r = (bg[0] * 255.0) as u8;
         let bg_g = (bg[1] * 255.0) as u8;

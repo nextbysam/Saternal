@@ -61,11 +61,14 @@ impl App {
             config.appearance.opacity,
         )
         .await?;
-        
+
+        // Apply blur strength from config
+        renderer.set_blur_strength(config.appearance.blur_strength);
+
         // Apply DPI scale from the window's screen (or override if configured)
         let effective_scale = config.appearance.dpi_scale_override.unwrap_or(window_scale_factor);
         if effective_scale != window.scale_factor() {
-            info!("Applying scale factor: {:.2}x (window reported: {:.2}x)", 
+            info!("Applying scale factor: {:.2}x (window reported: {:.2}x)",
                   effective_scale, window.scale_factor());
             renderer.handle_scale_factor_changed(effective_scale)?;
         }
@@ -87,13 +90,14 @@ impl App {
         
         let renderer = Arc::new(Mutex::new(renderer));
 
-        info!("Configuring Metal layer for rendering");
+        info!("Configuring Metal layer for rendering and backdrop blur");
         unsafe {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
                     let ns_window: id = msg_send![ns_view, window];
-                    dropdown.lock().enable_vibrancy_layer(ns_window, ns_view)?;
+                    dropdown.lock().enable_vibrancy_layer(ns_window, ns_view, &window)?;
+
                 }
             }
         }

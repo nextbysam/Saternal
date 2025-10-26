@@ -8,6 +8,7 @@ use wgpu;
 /// - Loading images from disk (PNG, JPG, WEBP)
 /// - Creating GPU textures and bind groups
 /// - Providing a dummy fallback texture when no wallpaper is set
+/// - Applying CPU-based blur to wallpaper images
 pub struct WallpaperManager {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -15,6 +16,9 @@ pub struct WallpaperManager {
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
     has_wallpaper: bool,
+    // Store original image data for re-blurring
+    original_image: Option<image::RgbaImage>,
+    current_blur_strength: f32,
 }
 
 impl WallpaperManager {
@@ -47,21 +51,32 @@ impl WallpaperManager {
             bind_group,
             bind_group_layout,
             has_wallpaper: false,
+            original_image: None,
+            current_blur_strength: 0.0,
         }
     }
 
     /// Load a wallpaper image from a file path
     pub fn load(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) -> Result<()> {
         // Expand tilde to home directory
-        let expanded_path = if path.starts_with('~') {
+        let expanded_path = if path == "~" {
+            // Exact "~" - return HOME directory
+            if let Some(home) = std::env::var_os("HOME") {
+                home.to_string_lossy().to_string()
+            } else {
+                path.to_string()
+            }
+        } else if let Some(remainder) = path.strip_prefix("~/") {
+            // "~/" prefix - join remainder onto HOME
             if let Some(home) = std::env::var_os("HOME") {
                 let mut home_path = std::path::PathBuf::from(home);
-                home_path.push(&path[2..]); // Skip "~/"
+                home_path.push(remainder);
                 home_path.to_string_lossy().to_string()
             } else {
                 path.to_string()
             }
         } else {
+            // Other cases (including "~user", no tilde, etc.) - return as-is
             path.to_string()
         };
 
@@ -71,16 +86,24 @@ impl WallpaperManager {
         let img = image::open(Path::new(&expanded_path))
             .context(format!("Failed to open wallpaper image: {}", expanded_path))?;
 
-        // Convert to RGBA8
-        let rgba = img.to_rgba8();
-        let dimensions = rgba.dimensions();
+        // Convert to RGBA8 and store original
+        let original_rgba = img.to_rgba8();
+        let dimensions = original_rgba.dimensions();
 
         log::info!(
             "Wallpaper loaded: {}x{} pixels ({} bytes)",
             dimensions.0,
             dimensions.1,
-            rgba.len()
+            original_rgba.len()
         );
+
+        // Apply blur if current blur strength > 0
+        let rgba = if self.current_blur_strength > 0.0 {
+            log::info!("Applying initial blur with strength: {}", self.current_blur_strength);
+            Self::apply_box_blur(&original_rgba, self.current_blur_strength)
+        } else {
+            original_rgba.clone()
+        };
 
         // Create texture
         let size = wgpu::Extent3d {
@@ -169,6 +192,7 @@ impl WallpaperManager {
         self.texture = texture;
         self.view = view;
         self.has_wallpaper = true;
+        self.original_image = Some(original_rgba);
 
         log::info!("Wallpaper loaded successfully");
         Ok(())
@@ -193,6 +217,8 @@ impl WallpaperManager {
         self.texture = texture;
         self.view = view;
         self.has_wallpaper = false;
+        self.original_image = None;
+        self.current_blur_strength = 0.0;
 
         log::info!("Wallpaper cleared");
     }
@@ -210,6 +236,120 @@ impl WallpaperManager {
     /// Get the bind group layout for pipeline creation
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
+    }
+
+    /// Set blur strength and re-blur wallpaper if loaded
+    /// strength: 0.0 = no blur, 1.0-10.0 = increasing blur
+    pub fn set_blur_strength(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, strength: f32) -> Result<()> {
+        self.current_blur_strength = strength;
+
+        // If no wallpaper loaded, just store the strength for when one is loaded
+        let Some(original) = &self.original_image else {
+            log::info!("Blur strength set to {} (no wallpaper loaded yet)", strength);
+            return Ok(());
+        };
+
+        log::info!("Applying blur with strength: {}", strength);
+
+        // Apply blur to original image
+        let blurred = if strength > 0.0 {
+            Self::apply_box_blur(original, strength)
+        } else {
+            original.clone()
+        };
+
+        // Upload blurred image to GPU
+        self.upload_image_to_texture(device, queue, &blurred)?;
+
+        log::info!("Blur applied successfully");
+        Ok(())
+    }
+
+    /// Upload an RGBA image to the current texture
+    fn upload_image_to_texture(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &image::RgbaImage,
+    ) -> Result<()> {
+        let dimensions = rgba.dimensions();
+
+        // Upload with proper alignment
+        const ALIGNMENT: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let unpadded_bytes_per_row = 4 * dimensions.0;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 1,
+        };
+
+        if unpadded_bytes_per_row == padded_bytes_per_row {
+            // No padding needed
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(unpadded_bytes_per_row),
+                    rows_per_image: Some(dimensions.1),
+                },
+                size,
+            );
+        } else {
+            // Padding required
+            let padded_size = (padded_bytes_per_row * dimensions.1) as usize;
+            let mut padded_data = vec![0u8; padded_size];
+            let rgba_bytes = rgba.as_raw();
+
+            for y in 0..dimensions.1 {
+                let src_offset = (y * unpadded_bytes_per_row) as usize;
+                let dst_offset = (y * padded_bytes_per_row) as usize;
+                padded_data[dst_offset..dst_offset + unpadded_bytes_per_row as usize]
+                    .copy_from_slice(&rgba_bytes[src_offset..src_offset + unpadded_bytes_per_row as usize]);
+            }
+
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded_data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(dimensions.1),
+                },
+                size,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Apply box blur to an image (simple, fast CPU blur)
+    /// strength: blur radius in pixels (0.0-10.0)
+    fn apply_box_blur(img: &image::RgbaImage, strength: f32) -> image::RgbaImage {
+        if strength <= 0.0 {
+            return img.clone();
+        }
+
+        // Convert strength to radius (1.0 = 2px radius, 10.0 = 20px radius)
+        let radius = (strength * 2.0).round() as u32;
+        let radius = radius.max(1);
+
+        log::info!("Applying box blur with radius: {}px", radius);
+
+        // Use image crate's built-in blur (Gaussian approximation via box blur)
+        image::imageops::blur(img, radius as f32)
     }
 
     /// Create bind group layout (shared by all wallpaper textures)

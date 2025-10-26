@@ -6,6 +6,7 @@ use saternal_core::{
     Config, InputModifiers, Renderer, SearchState, SelectionManager, SplitDirection,
     is_jump_to_bottom, key_to_bytes,
 };
+use saternal_macos::DropdownWindow;
 use std::sync::Arc;
 use winit::{
     event::{ElementState, KeyEvent, Modifiers},
@@ -24,6 +25,7 @@ pub(super) fn handle_keyboard_input(
     config: &mut Config,
     font_size: &mut f32,
     window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -66,7 +68,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown)
 }
 
 fn handle_escape(
@@ -316,6 +318,7 @@ fn handle_terminal_input(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -344,7 +347,7 @@ fn handle_terminal_input(
                         log::info!("✓ Command detected: {}", cmd_name);
 
                         // Execute command
-                        let success = execute_command(cmd, renderer, window);
+                        let success = execute_command(cmd, renderer, window, dropdown);
 
                         if success {
                             log::info!("✓ Command executed successfully");
@@ -391,6 +394,7 @@ fn get_command_name(cmd: &crate::app::commands::TerminalCommand) -> &'static str
         TerminalCommand::Wallpaper { .. } => "Wallpaper",
         TerminalCommand::WallpaperOpacity { .. } => "WallpaperOpacity",
         TerminalCommand::BackgroundOpacity { .. } => "BackgroundOpacity",
+        TerminalCommand::BlurStrength { .. } => "BlurStrength",
     }
 }
 
@@ -399,6 +403,7 @@ fn execute_command(
     cmd: crate::app::commands::TerminalCommand,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
+    dropdown: &Arc<Mutex<DropdownWindow>>,
 ) -> bool {
     use crate::app::commands::TerminalCommand;
 
@@ -412,6 +417,10 @@ fn execute_command(
         }
         TerminalCommand::BackgroundOpacity { opacity } => {
             renderer.lock().set_background_opacity(*opacity);
+            Ok(())
+        }
+        TerminalCommand::BlurStrength { strength } => {
+            renderer.lock().set_blur_strength(*strength);
             Ok(())
         }
     };

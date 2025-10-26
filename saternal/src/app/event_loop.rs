@@ -14,11 +14,12 @@ impl App {
         let window = self.window.clone();
         let renderer = self.renderer.clone();
         let tab_manager = self.tab_manager.clone();
+        let dropdown = self.dropdown.clone();
         let hotkey_manager = self.hotkey_manager.clone();
         let mut font_size = self.font_size;
         let mut config = self.config.clone();
         let mut modifiers_state = winit::event::Modifiers::default();
-        
+
         let mut selection_manager = self.selection_manager;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
@@ -77,6 +78,7 @@ impl App {
                         &mut config,
                         &mut font_size,
                         &window,
+                        &dropdown,
                     );
                     window.request_redraw();
                 }

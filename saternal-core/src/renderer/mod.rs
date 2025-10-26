@@ -1,4 +1,3 @@
-mod blur;
 mod borders;
 mod color;
 pub mod cursor;
@@ -659,15 +658,15 @@ impl Renderer {
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             info!("Resizing renderer to {}x{}", width, height);
-            
+
             // Update surface configuration
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            
+
             // Resize texture manager
             self.texture_manager.resize(&self.device, width, height, self.config.format);
-            
+
             info!("Renderer resized successfully");
         }
     }
@@ -791,5 +790,14 @@ impl Renderer {
             opacity,
             self.wallpaper_manager.has_wallpaper(),
         );
+    }
+
+    /// Set blur strength (0.0 = disabled, 2.0 = default, 10.0 = heavy)
+    /// Applies CPU-based blur to the wallpaper image
+    pub fn set_blur_strength(&mut self, strength: f32) {
+        info!("Setting blur strength: {}", strength);
+        if let Err(e) = self.wallpaper_manager.set_blur_strength(&self.device, &self.queue, strength) {
+            log::error!("Failed to apply blur: {}", e);
+        }
     }
 }

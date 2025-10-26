@@ -118,14 +118,12 @@ impl DropdownWindow {
         Ok((physical_width, physical_height, backing_scale_factor))
     }
 
-    /// Enable vibrancy after wgpu surface is created
+    /// Enable transparency layer after wgpu surface is created
     /// Call this AFTER the renderer is initialized
-    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id) -> Result<()> {
-        // First, configure the Metal layer for transparency
+    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id, window: &winit::window::Window) -> Result<()> {
+        // Configure the Metal layer for transparency
         self.configure_metal_layer(ns_view)?;
-        // Enable vibrancy (blur) effect
-        self.enable_vibrancy(ns_window)?;
-        info!("✓ Vibrancy (blur) effect enabled");
+        info!("✓ Transparency layer configured");
         Ok(())
     }
 
@@ -156,21 +154,6 @@ impl DropdownWindow {
         } else {
             info!("WARNING: No layer found on winit NSView! wgpu may not have created it yet.");
         }
-
-        Ok(())
-    }
-
-    /// Enable vibrancy (background blur) effect
-    ///
-    /// Since we have transparency enabled (setOpaque:NO), macOS automatically
-    /// provides blur when the window has transparent areas. We don't need to
-    /// add NSVisualEffectView which causes view hierarchy issues with winit.
-    unsafe fn enable_vibrancy(&self, _ns_window: id) -> Result<()> {
-        // With window transparency (setOpaque:NO) and clear background color,
-        // macOS provides automatic vibrancy/blur effect through the compositor.
-        // This is simpler and doesn't interfere with winit's view management.
-
-        info!("Vibrancy enabled via window transparency (macOS compositor blur)");
 
         Ok(())
     }

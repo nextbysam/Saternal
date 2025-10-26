@@ -50,7 +50,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample terminal content (text + background)
     let terminal_color = textureSample(t_texture, t_sampler, input.tex_coords);
 
-    // If no wallpaper, apply background opacity and return
+    // If no wallpaper, just return terminal with applied opacity
     if (opacity.has_wallpaper == 0u) {
         return vec4<f32>(terminal_color.rgb, terminal_color.a * opacity.background_opacity);
     }
@@ -65,9 +65,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     );
 
     // Blend layers using premultiplied alpha:
-    // wallpaper (bottom) → terminal content (top)
-    let blended = wallpaper_dimmed * (1.0 - terminal_color.a) + terminal_color;
+    // Layer compositing: wallpaper (bottom) → terminal content (top)
+    // Formula: result = foreground + background * (1 - foreground.a)
+    let blended = terminal_color + wallpaper_dimmed * (1.0 - terminal_color.a);
 
-    // Apply overall background opacity
-    return vec4<f32>(blended.rgb, blended.a * opacity.background_opacity);
+    // Return blended result
+    // Note: We keep the terminal's alpha, not multiplying by background_opacity
+    // This ensures text remains visible
+    return blended;
 }
