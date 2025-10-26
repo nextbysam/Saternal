@@ -14,13 +14,14 @@ pub enum TerminalCommand {
 }
 
 /// Parse a command from terminal input
+/// Simply looks for command keywords anywhere in the line (handles prompts automatically)
 pub fn parse_command(line: &str) -> Option<TerminalCommand> {
     let line = line.trim();
-    log::warn!("🔍 PARSING COMMAND: '{}'", line);
+    log::info!("🔍 PARSING COMMAND: '{}'", line);
 
-    // Wallpaper command
-    if line.starts_with("wallpaper ") {
-        let arg = line[10..].trim();
+    // Wallpaper command - find "wallpaper " anywhere in line
+    if let Some(pos) = line.find("wallpaper ") {
+        let arg = line[pos + 10..].trim();
         if arg == "clear" {
             return Some(TerminalCommand::Wallpaper { path: None });
         } else if arg.is_empty() {
@@ -39,9 +40,9 @@ pub fn parse_command(line: &str) -> Option<TerminalCommand> {
         }
     }
 
-    // Wallpaper opacity command
-    if line.starts_with("wallpaper-opacity ") {
-        let arg = line[18..].trim();
+    // Wallpaper opacity command - find anywhere in line
+    if let Some(pos) = line.find("wallpaper-opacity ") {
+        let arg = line[pos + 18..].trim();
         if let Ok(opacity) = arg.parse::<f32>() {
             if (0.0..=1.0).contains(&opacity) {
                 return Some(TerminalCommand::WallpaperOpacity { opacity });
@@ -55,9 +56,9 @@ pub fn parse_command(line: &str) -> Option<TerminalCommand> {
         }
     }
 
-    // Background opacity command
-    if line.starts_with("background-opacity ") {
-        let arg = line[19..].trim();
+    // Background opacity command - find anywhere in line
+    if let Some(pos) = line.find("background-opacity ") {
+        let arg = line[pos + 19..].trim();
         if let Ok(opacity) = arg.parse::<f32>() {
             if (0.0..=1.0).contains(&opacity) {
                 return Some(TerminalCommand::BackgroundOpacity { opacity });
@@ -171,5 +172,60 @@ mod tests {
     fn test_parse_unknown_command() {
         let cmd = parse_command("some-other-command");
         assert_eq!(cmd, None);
+    }
+
+    // Prompt stripping tests
+    #[test]
+    fn test_strip_prompt_zsh() {
+        let cmd = parse_command("sam@Sams-MacBook-Pro saternal % wallpaper beautiful.png");
+        assert_eq!(
+            cmd,
+            Some(TerminalCommand::Wallpaper {
+                path: Some("beautiful.png".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn test_strip_prompt_bash() {
+        let cmd = parse_command("user@host ~/dir $ wallpaper image.jpg");
+        assert_eq!(
+            cmd,
+            Some(TerminalCommand::Wallpaper {
+                path: Some("image.jpg".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn test_strip_prompt_sh() {
+        let cmd = parse_command("> wallpaper test.png");
+        assert_eq!(
+            cmd,
+            Some(TerminalCommand::Wallpaper {
+                path: Some("test.png".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn test_strip_prompt_with_opacity() {
+        let cmd = parse_command("user@host $ wallpaper-opacity 0.5");
+        assert_eq!(
+            cmd,
+            Some(TerminalCommand::WallpaperOpacity { opacity: 0.5 })
+        );
+    }
+
+    #[test]
+    fn test_no_prompt() {
+        // Should still work without prompt
+        let cmd = parse_command("wallpaper /path/to/file.png");
+        assert_eq!(
+            cmd,
+            Some(TerminalCommand::Wallpaper {
+                path: Some("/path/to/file.png".to_string())
+            })
+        );
     }
 }

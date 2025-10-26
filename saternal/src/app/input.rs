@@ -282,7 +282,10 @@ fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>)
     let tab_mgr = tab_manager.lock();
     let active_tab = tab_mgr.active_tab()?;
     let pane = active_tab.pane_tree.focused_pane()?;
-    let term_lock = pane.terminal.term().try_lock()?;
+
+    // Extend lifetime by binding the Arc first
+    let term_arc = pane.terminal.term();
+    let term_lock = term_arc.try_lock()?;
 
     let grid = term_lock.grid();
     let cursor_line = grid.cursor.point.line;
@@ -292,8 +295,9 @@ fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>)
 
     // Fast iteration over grid cells - zero-copy char extraction
     let num_cols = grid.columns();
-    for col in 0..num_cols {
-        let cell = &grid[cursor_line][col];
+    for col_idx in 0..num_cols {
+        let column = Column(col_idx);
+        let cell = &grid[cursor_line][column];
         let ch = cell.c;
 
         // Early termination on null/empty
