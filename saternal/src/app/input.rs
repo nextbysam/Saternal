@@ -1,3 +1,4 @@
+use alacritty_terminal::grid::Dimensions;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{
@@ -22,7 +23,6 @@ pub(super) fn handle_keyboard_input(
     config: &mut Config,
     font_size: &mut f32,
     window: &winit::window::Window,
-    command_buffer: &Arc<Mutex<String>>,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -65,7 +65,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, command_buffer)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window)
 }
 
 fn handle_escape(
@@ -275,13 +275,43 @@ fn handle_ctrl_shortcuts(
     }
 }
 
+/// Fast inline function to read the current line from terminal grid
+#[inline]
+fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) -> Option<String> {
+    let tab_mgr = tab_manager.lock();
+    let active_tab = tab_mgr.active_tab()?;
+    let pane = active_tab.pane_tree.focused_pane()?;
+    let term_lock = pane.terminal.term().try_lock()?;
+
+    let grid = term_lock.grid();
+    let cursor = term_lock.cursor_position();
+    let cursor_line = cursor.line;
+
+    // Pre-allocate with reasonable capacity (most commands < 256 chars)
+    let mut line = String::with_capacity(256);
+
+    // Fast iteration over grid cells - zero-copy char extraction
+    let num_cols = grid.columns();
+    for col in 0..num_cols {
+        let cell = &grid[cursor_line][col];
+        let ch = cell.c;
+
+        // Early termination on null/empty
+        if ch == '\0' || ch == ' ' && line.is_empty() {
+            continue;
+        }
+        line.push(ch);
+    }
+
+    Some(line.trim_end().to_string())
+}
+
 fn handle_terminal_input(
     event: &KeyEvent,
     modifiers_state: &Modifiers,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
-    command_buffer: &Arc<Mutex<String>>,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -298,34 +328,33 @@ fn handle_terminal_input(
     // Try to convert key to terminal bytes
     if let PhysicalKey::Code(keycode) = event.physical_key {
         if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
-            // Handle special keys that affect command buffer
+            // Check for Enter key - intercept to detect commands
             if bytes == b"\r" || bytes == b"\n" {
-                // Check if command buffer contains a terminal command
-                let buffer_content = command_buffer.lock().clone();
-                log::warn!("🔍 ENTER PRESSED - Command buffer: '{}'", buffer_content);
-                if let Some(cmd) = crate::app::commands::parse_command(&buffer_content) {
-                    // Execute command and clear buffer
-                    log::warn!("✓ COMMAND DETECTED: {:?}", cmd);
-                    let result = execute_command(cmd, renderer, window);
-                    if result {
-                        log::warn!("🧹 CLEARING BUFFER AFTER SUCCESSFUL COMMAND EXECUTION");
-                        command_buffer.lock().clear();
-                        return true;
-                    } else {
-                        log::warn!("⚠️ COMMAND EXECUTION FAILED - NOT CLEARING BUFFER");
-                        return true;
+                // Read current line from grid (captures typed + autocompleted + pasted text)
+                if let Some(line) = read_current_line_from_grid(tab_manager) {
+                    log::info!("🔍 ENTER PRESSED - Current line: '{}'", line);
+
+                    // Check if it's a terminal command
+                    if let Some(cmd) = crate::app::commands::parse_command(&line) {
+                        log::info!("✓ COMMAND DETECTED: {:?}", cmd);
+
+                        // Execute command
+                        let success = execute_command(cmd, renderer, window);
+
+                        if success {
+                            log::info!("✓ Command executed successfully");
+                            // Don't pass Enter to shell - command was consumed
+                            return true;
+                        } else {
+                            log::warn!("⚠️ Command execution failed");
+                            return true;
+                        }
                     }
                 }
-                // Not a command, clear buffer and pass Enter to terminal
-                log::warn!("✗ NOT A COMMAND - Clearing buffer and passing to shell");
-                log::warn!("🧹 CLEARING BUFFER - NOT A COMMAND");
-                command_buffer.lock().clear();
-            } else if bytes == b"\x7f" || bytes == b"\x08" {
-                // Backspace - remove last char from buffer
-                command_buffer.lock().pop();
+                // Not a command - fall through to pass Enter to terminal
             }
 
-            // Pass to terminal
+            // Pass to terminal (including Enter if not a command)
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(&bytes);
             }
@@ -338,36 +367,12 @@ fn handle_terminal_input(
     // Handle regular text input
     if !input_mods.ctrl && !input_mods.alt {
         if let Some(text) = &event.text {
-            log::debug!("📝 Text input: '{}' (chars: {})", text, text.chars().collect::<Vec<_>>().len());
-
-            // Add to command buffer for command detection
-            for ch in text.chars() {
-                if ch.is_ascii() && !ch.is_control() {
-                    command_buffer.lock().push(ch);
-                    let buffer_content = command_buffer.lock().clone();
-                    log::warn!("  ✓ Added '{}' to buffer, buffer now: '{}'", ch, buffer_content);
-                } else {
-                    log::warn!("  ✗ Skipped '{}' (ascii={}, control={})", ch, ch.is_ascii(), ch.is_control());
-                }
-            }
-            
-            // Log the final buffer state after adding all characters
-            let final_buffer = command_buffer.lock().clone();
-            log::warn!("📝 FINAL BUFFER STATE: '{}'", final_buffer);
-            
-            // Check if this looks like a command that might be executed
-            if final_buffer.starts_with("wallpaper ") {
-                log::warn!("⚠️ WARNING: Buffer contains incomplete wallpaper command: '{}'", final_buffer);
-            }
-
             // Pass to terminal
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 let _ = active_tab.write_input(text.as_bytes());
             }
             renderer.lock().reset_scroll();
             window.request_redraw();
-        } else {
-            log::debug!("⚠️ Keyboard event without text field: {:?}", event.logical_key);
         }
     }
 

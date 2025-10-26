@@ -22,7 +22,6 @@ impl App {
         let mut selection_manager = self.selection_manager;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
-        let command_buffer = Arc::clone(&self.command_buffer);
 
         info!("Starting event loop");
 
@@ -78,7 +77,6 @@ impl App {
                         &mut config,
                         &mut font_size,
                         &window,
-                        &command_buffer,
                     );
                     window.request_redraw();
                 }
