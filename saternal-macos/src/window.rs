@@ -108,10 +108,14 @@ impl DropdownWindow {
         // Get the screen's scale factor for proper terminal sizing
         let backing_scale_factor: f64 = msg_send![screen, backingScaleFactor];
 
-        info!("Configured dropdown window: {}x{} at ({}, {}) with scale factor {:.2}x",
-              window_width, window_height, window_x, window_y, backing_scale_factor);
+        // Convert from points to physical pixels
+        let physical_width = (window_width as f64 * backing_scale_factor).round() as u32;
+        let physical_height = (window_height as f64 * backing_scale_factor).round() as u32;
 
-        Ok((window_width as u32, window_height as u32, backing_scale_factor))
+        info!("Configured dropdown window: {}x{} at ({}, {}) with scale factor {:.2}x (physical: {}x{})",
+              window_width, window_height, window_x, window_y, backing_scale_factor, physical_width, physical_height);
+
+        Ok((physical_width, physical_height, backing_scale_factor))
     }
 
     /// Enable vibrancy after wgpu surface is created

@@ -231,9 +231,9 @@ impl BlurRenderer {
         source_view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
     ) {
-        if self.temp_texture_view.is_none() {
+        let Some(temp_view) = &self.temp_texture_view else {
             return;
-        }
+        };
 
         // Horizontal pass: source -> temp
         self.bind_group_horizontal = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -261,9 +261,7 @@ impl BlurRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        self.temp_texture_view.as_ref().unwrap(),
-                    ),
+                    resource: wgpu::BindingResource::TextureView(temp_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -285,9 +283,20 @@ impl BlurRenderer {
         queue: &wgpu::Queue,
         output_view: &wgpu::TextureView,
     ) {
-        if !self.enabled || self.temp_texture_view.is_none() {
+        if !self.enabled {
             return;
         }
+
+        // Early return if bind groups aren't prepared
+        let Some(temp_view) = &self.temp_texture_view else {
+            return;
+        };
+        let Some(bind_group_horizontal) = &self.bind_group_horizontal else {
+            return;
+        };
+        let Some(bind_group_vertical) = &self.bind_group_vertical else {
+            return;
+        };
 
         // Pass 1: Horizontal blur (source -> temp)
         {
@@ -304,7 +313,7 @@ impl BlurRenderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Blur Pass Horizontal"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.temp_texture_view.as_ref().unwrap(),
+                    view: temp_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -317,7 +326,7 @@ impl BlurRenderer {
             });
 
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, self.bind_group_horizontal.as_ref().unwrap(), &[]);
+            render_pass.set_bind_group(0, bind_group_horizontal, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
         }
@@ -350,7 +359,7 @@ impl BlurRenderer {
             });
 
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, self.bind_group_vertical.as_ref().unwrap(), &[]);
+            render_pass.set_bind_group(0, bind_group_vertical, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
         }

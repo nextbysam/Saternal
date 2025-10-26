@@ -100,22 +100,59 @@ impl WallpaperManager {
             view_formats: &[],
         });
 
-        // Upload image data to GPU
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &rgba,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * dimensions.0),
-                rows_per_image: Some(dimensions.1),
-            },
-            size,
-        );
+        // Upload image data to GPU with proper alignment
+        // wgpu requires bytes_per_row to be aligned to COPY_BYTES_PER_ROW_ALIGNMENT (256 bytes)
+        const ALIGNMENT: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let unpadded_bytes_per_row = 4 * dimensions.0;
+        let padded_bytes_per_row = (unpadded_bytes_per_row + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
+
+        if unpadded_bytes_per_row == padded_bytes_per_row {
+            // No padding needed - image width naturally aligns
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(unpadded_bytes_per_row),
+                    rows_per_image: Some(dimensions.1),
+                },
+                size,
+            );
+        } else {
+            // Padding required - create aligned buffer
+            let padded_size = (padded_bytes_per_row * dimensions.1) as usize;
+            let mut padded_data = vec![0u8; padded_size];
+            let rgba_bytes = rgba.as_raw();
+
+            // Copy each row with padding
+            for y in 0..dimensions.1 {
+                let src_offset = (y * unpadded_bytes_per_row) as usize;
+                let dst_offset = (y * padded_bytes_per_row) as usize;
+                padded_data[dst_offset..dst_offset + unpadded_bytes_per_row as usize]
+                    .copy_from_slice(&rgba_bytes[src_offset..src_offset + unpadded_bytes_per_row as usize]);
+            }
+
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded_data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(dimensions.1),
+                },
+                size,
+            );
+        }
 
         // Create view
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

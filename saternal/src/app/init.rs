@@ -70,19 +70,20 @@ impl App {
             renderer.handle_scale_factor_changed(effective_scale)?;
         }
         
-        // Calculate terminal dimensions from the actual window dimensions
+        // Calculate terminal dimensions from the actual window dimensions (physical pixels)
+        let physical_size = window.inner_size();
         let effective_size = renderer.font_manager().effective_font_size();
         let line_metrics = renderer.font_manager().font().horizontal_line_metrics(effective_size).unwrap();
         let cell_width = renderer.font_manager().font().metrics('M', effective_size).advance_width;
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let (initial_cols, initial_rows) = Self::calculate_terminal_size(
-            window_width,
-            window_height,
+            physical_size.width,
+            physical_size.height,
             cell_width,
             cell_height
         );
         info!("Calculated initial terminal size: {}x{} for window {}x{} (scale: {:.2}x)",
-              initial_cols, initial_rows, window_width, window_height, effective_scale);
+              initial_cols, initial_rows, physical_size.width, physical_size.height, effective_scale);
         
         let renderer = Arc::new(Mutex::new(renderer));
 

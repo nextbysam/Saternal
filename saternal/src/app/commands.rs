@@ -22,22 +22,26 @@ pub fn parse_command(line: &str) -> Option<TerminalCommand> {
     // Wallpaper command - find "wallpaper " anywhere in line
     if let Some(pos) = line.find("wallpaper ") {
         let arg = line[pos + 10..].trim();
+
+        // First check: empty argument is not a valid command
+        if arg.is_empty() {
+            return None;
+        }
+
+        // Second check: "clear" means remove wallpaper
         if arg == "clear" {
             return Some(TerminalCommand::Wallpaper { path: None });
-        } else if arg.is_empty() {
-            // Empty argument - not a valid command
-            return None;
-        } else {
-            // Validate that the argument looks like a valid file path
-            if arg.len() < 3 || !arg.contains('.') {
-                log::warn!("⚠️ INVALID WALLPAPER ARGUMENT: '{}' - too short or no extension", arg);
-                return None;
-            }
-            let expanded_path = expand_tilde(arg);
-            return Some(TerminalCommand::Wallpaper {
-                path: Some(expanded_path),
-            });
         }
+
+        // Third check: expand tilde and validate resulting path
+        let expanded_path = expand_tilde(arg);
+        if expanded_path.is_empty() {
+            return None;
+        }
+
+        return Some(TerminalCommand::Wallpaper {
+            path: Some(expanded_path),
+        });
     }
 
     // Wallpaper opacity command - find anywhere in line
@@ -77,13 +81,54 @@ pub fn parse_command(line: &str) -> Option<TerminalCommand> {
 
 /// Expand tilde (~) to home directory
 fn expand_tilde(path: &str) -> String {
-    if path.starts_with('~') {
-        if let Some(home) = std::env::var_os("HOME") {
-            let mut home_path = std::path::PathBuf::from(home);
-            home_path.push(&path[2..]); // Skip "~/"
-            return home_path.to_string_lossy().to_string();
-        }
+    if !path.starts_with('~') {
+        return path.to_string();
     }
+
+    // Get home directory (check USERPROFILE on Windows if HOME not set)
+    let home = std::env::var_os("HOME")
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                std::env::var_os("USERPROFILE")
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        });
+
+    let Some(home) = home else {
+        // No home directory available, return unchanged
+        return path.to_string();
+    };
+
+    let mut home_path = std::path::PathBuf::from(home);
+
+    // Handle exact "~" - return home directory
+    if path == "~" {
+        return home_path.to_string_lossy().to_string();
+    }
+
+    // Handle "~/" or "~\" (Windows)
+    if path.starts_with("~/") {
+        // Safe: we know path starts with "~/" (2 chars minimum)
+        if let Some(remainder) = path.get(2..) {
+            home_path.push(remainder);
+        }
+        return home_path.to_string_lossy().to_string();
+    }
+
+    #[cfg(windows)]
+    if path.starts_with("~\\") {
+        // Safe: we know path starts with "~\" (2 chars minimum)
+        if let Some(remainder) = path.get(2..) {
+            home_path.push(remainder);
+        }
+        return home_path.to_string_lossy().to_string();
+    }
+
+    // Anything else like "~user" - leave unchanged (user expansion not supported)
     path.to_string()
 }
 

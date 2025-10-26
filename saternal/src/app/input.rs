@@ -336,11 +336,12 @@ fn handle_terminal_input(
             if bytes == b"\r" || bytes == b"\n" {
                 // Read current line from grid (captures typed + autocompleted + pasted text)
                 if let Some(line) = read_current_line_from_grid(tab_manager) {
-                    log::info!("🔍 ENTER PRESSED - Current line: '{}'", line);
+                    log::debug!("Enter pressed - checking for command (line length: {})", line.len());
 
                     // Check if it's a terminal command
                     if let Some(cmd) = crate::app::commands::parse_command(&line) {
-                        log::info!("✓ COMMAND DETECTED: {:?}", cmd);
+                        let cmd_name = get_command_name(&cmd);
+                        log::info!("✓ Command detected: {}", cmd_name);
 
                         // Execute command
                         let success = execute_command(cmd, renderer, window);
@@ -381,6 +382,16 @@ fn handle_terminal_input(
     }
 
     false
+}
+
+/// Get sanitized command name without user data
+fn get_command_name(cmd: &crate::app::commands::TerminalCommand) -> &'static str {
+    use crate::app::commands::TerminalCommand;
+    match cmd {
+        TerminalCommand::Wallpaper { .. } => "Wallpaper",
+        TerminalCommand::WallpaperOpacity { .. } => "WallpaperOpacity",
+        TerminalCommand::BackgroundOpacity { .. } => "BackgroundOpacity",
+    }
 }
 
 /// Execute a terminal command

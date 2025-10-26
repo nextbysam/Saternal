@@ -91,7 +91,7 @@ impl Default for Config {
                 blur: true,
                 cursor: CursorConfig::default(),
                 dpi_scale_override: None,
-                wallpaper_path: Some("/Users/sam/saternal/beautiful.png".to_string()),
+                wallpaper_path: None,
                 wallpaper_opacity: 0.3,
             },
             terminal: TerminalConfig {
