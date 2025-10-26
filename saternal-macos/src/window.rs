@@ -120,7 +120,7 @@ impl DropdownWindow {
 
     /// Enable transparency layer after wgpu surface is created
     /// Call this AFTER the renderer is initialized
-    pub unsafe fn enable_vibrancy_layer(&self, ns_window: id, ns_view: id, window: &winit::window::Window) -> Result<()> {
+    pub unsafe fn enable_vibrancy_layer(&self, ns_view: id) -> Result<()> {
         // Configure the Metal layer for transparency
         self.configure_metal_layer(ns_view)?;
         info!("✓ Transparency layer configured");

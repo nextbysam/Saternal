@@ -19,7 +19,7 @@ pub enum TerminalCommand {
 /// Simply looks for command keywords anywhere in the line (handles prompts automatically)
 pub fn parse_command(line: &str) -> Option<TerminalCommand> {
     let line = line.trim();
-    log::info!("🔍 PARSING COMMAND: '{}'", line);
+    log::debug!("🔍 PARSING COMMAND: '{}'", line);
 
     // Wallpaper command - find "wallpaper " anywhere in line
     if let Some(pos) = line.find("wallpaper ") {

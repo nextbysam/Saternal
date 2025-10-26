@@ -52,7 +52,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // If no wallpaper, just return terminal with applied opacity
     if (opacity.has_wallpaper == 0u) {
-        return vec4<f32>(terminal_color.rgb, terminal_color.a * opacity.background_opacity);
+        return vec4<f32>(terminal_color.rgb * opacity.background_opacity, terminal_color.a * opacity.background_opacity);
     }
 
     // Sample wallpaper texture

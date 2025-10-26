@@ -95,8 +95,7 @@ impl App {
             if let Ok(handle) = window.window_handle() {
                 if let RawWindowHandle::AppKit(appkit_handle) = handle.as_raw() {
                     let ns_view = appkit_handle.ns_view.as_ptr() as id;
-                    let ns_window: id = msg_send![ns_view, window];
-                    dropdown.lock().enable_vibrancy_layer(ns_window, ns_view, &window)?;
+                    dropdown.lock().enable_vibrancy_layer(ns_view)?;
 
                 }
             }
