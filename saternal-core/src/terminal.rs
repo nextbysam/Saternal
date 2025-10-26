@@ -138,10 +138,6 @@ impl Terminal {
             }
         }
 
-        if total_bytes > 0 {
-            info!("Processed {} bytes total from shell", total_bytes);
-        }
-
         Ok(total_bytes)
     }
 
