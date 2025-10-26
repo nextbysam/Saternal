@@ -22,7 +22,7 @@ pub(super) fn handle_keyboard_input(
     config: &mut Config,
     font_size: &mut f32,
     window: &winit::window::Window,
-    command_buffer: &mut String,
+    command_buffer: &Arc<Mutex<String>>,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -281,7 +281,7 @@ fn handle_terminal_input(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
-    command_buffer: &mut String,
+    command_buffer: &Arc<Mutex<String>>,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -301,20 +301,28 @@ fn handle_terminal_input(
             // Handle special keys that affect command buffer
             if bytes == b"\r" || bytes == b"\n" {
                 // Check if command buffer contains a terminal command
-                log::warn!("🔍 ENTER PRESSED - Command buffer: '{}'", command_buffer);
-                if let Some(cmd) = crate::app::commands::parse_command(command_buffer) {
+                let buffer_content = command_buffer.lock().clone();
+                log::warn!("🔍 ENTER PRESSED - Command buffer: '{}'", buffer_content);
+                if let Some(cmd) = crate::app::commands::parse_command(&buffer_content) {
                     // Execute command and clear buffer
                     log::warn!("✓ COMMAND DETECTED: {:?}", cmd);
-                    execute_command(cmd, renderer, window);
-                    command_buffer.clear();
-                    return true;
+                    let result = execute_command(cmd, renderer, window);
+                    if result {
+                        log::warn!("🧹 CLEARING BUFFER AFTER SUCCESSFUL COMMAND EXECUTION");
+                        command_buffer.lock().clear();
+                        return true;
+                    } else {
+                        log::warn!("⚠️ COMMAND EXECUTION FAILED - NOT CLEARING BUFFER");
+                        return true;
+                    }
                 }
                 // Not a command, clear buffer and pass Enter to terminal
                 log::warn!("✗ NOT A COMMAND - Clearing buffer and passing to shell");
-                command_buffer.clear();
+                log::warn!("🧹 CLEARING BUFFER - NOT A COMMAND");
+                command_buffer.lock().clear();
             } else if bytes == b"\x7f" || bytes == b"\x08" {
                 // Backspace - remove last char from buffer
-                command_buffer.pop();
+                command_buffer.lock().pop();
             }
 
             // Pass to terminal
@@ -335,11 +343,21 @@ fn handle_terminal_input(
             // Add to command buffer for command detection
             for ch in text.chars() {
                 if ch.is_ascii() && !ch.is_control() {
-                    command_buffer.push(ch);
-                    log::debug!("  ✓ Added '{}' to buffer, buffer now: '{}'", ch, command_buffer);
+                    command_buffer.lock().push(ch);
+                    let buffer_content = command_buffer.lock().clone();
+                    log::warn!("  ✓ Added '{}' to buffer, buffer now: '{}'", ch, buffer_content);
                 } else {
-                    log::debug!("  ✗ Skipped '{}' (ascii={}, control={})", ch, ch.is_ascii(), ch.is_control());
+                    log::warn!("  ✗ Skipped '{}' (ascii={}, control={})", ch, ch.is_ascii(), ch.is_control());
                 }
+            }
+            
+            // Log the final buffer state after adding all characters
+            let final_buffer = command_buffer.lock().clone();
+            log::warn!("📝 FINAL BUFFER STATE: '{}'", final_buffer);
+            
+            // Check if this looks like a command that might be executed
+            if final_buffer.starts_with("wallpaper ") {
+                log::warn!("⚠️ WARNING: Buffer contains incomplete wallpaper command: '{}'", final_buffer);
             }
 
             // Pass to terminal
@@ -361,7 +379,7 @@ fn execute_command(
     cmd: crate::app::commands::TerminalCommand,
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
-) {
+) -> bool {
     use crate::app::commands::TerminalCommand;
 
     let result = match &cmd {
@@ -378,6 +396,7 @@ fn execute_command(
         }
     };
 
+    let success = result.is_ok();
     let _message = match result {
         Ok(_) => crate::app::commands::format_success_message(&cmd),
         Err(e) => crate::app::commands::format_error_message(&cmd, &e.to_string()),
@@ -387,4 +406,5 @@ fn execute_command(
     // For now, the log messages in the renderer are sufficient
 
     window.request_redraw();
+    success
 }

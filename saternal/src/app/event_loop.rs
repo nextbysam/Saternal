@@ -1,6 +1,7 @@
 use super::App;
 use anyhow::Result;
 use log::info;
+use std::sync::Arc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::ControlFlow,
@@ -21,7 +22,7 @@ impl App {
         let mut selection_manager = self.selection_manager;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
-        let mut command_buffer = self.command_buffer;
+        let command_buffer = Arc::clone(&self.command_buffer);
 
         info!("Starting event loop");
 
@@ -77,7 +78,7 @@ impl App {
                         &mut config,
                         &mut font_size,
                         &window,
-                        &mut command_buffer,
+                        &command_buffer,
                     );
                     window.request_redraw();
                 }
@@ -151,6 +152,8 @@ impl App {
                 _ => {}
             }
         })?;
+
+        // Command buffer is now shared via Arc<Mutex<String>>, no need to save back
 
         Ok(())
     }

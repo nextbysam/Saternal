@@ -179,7 +179,7 @@ impl App {
             clipboard,
             search_state,
             mouse_state,
-            command_buffer: String::new(),
+            command_buffer: Arc::new(Mutex::new(String::new())),
         })
     }
 }

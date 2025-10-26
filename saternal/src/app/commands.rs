@@ -16,13 +16,22 @@ pub enum TerminalCommand {
 /// Parse a command from terminal input
 pub fn parse_command(line: &str) -> Option<TerminalCommand> {
     let line = line.trim();
+    log::warn!("🔍 PARSING COMMAND: '{}'", line);
 
     // Wallpaper command
     if line.starts_with("wallpaper ") {
         let arg = line[10..].trim();
         if arg == "clear" {
             return Some(TerminalCommand::Wallpaper { path: None });
+        } else if arg.is_empty() {
+            // Empty argument - not a valid command
+            return None;
         } else {
+            // Validate that the argument looks like a valid file path
+            if arg.len() < 3 || !arg.contains('.') {
+                log::warn!("⚠️ INVALID WALLPAPER ARGUMENT: '{}' - too short or no extension", arg);
+                return None;
+            }
             let expanded_path = expand_tilde(arg);
             return Some(TerminalCommand::Wallpaper {
                 path: Some(expanded_path),

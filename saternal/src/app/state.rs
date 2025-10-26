@@ -20,7 +20,7 @@ pub struct App {
     pub(super) clipboard: Clipboard,
     pub(super) search_state: SearchState,
     pub(super) mouse_state: MouseState,
-    pub(super) command_buffer: String,
+    pub(super) command_buffer: Arc<Mutex<String>>,
 }
 
 impl App {
