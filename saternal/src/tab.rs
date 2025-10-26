@@ -16,8 +16,6 @@ impl Tab {
     }
     
     pub fn new_with_size(id: usize, cols: usize, rows: usize, shell: Option<String>) -> Result<Self> {
-        info!("Creating new tab: {} with size {}x{}", id, cols, rows);
-
         // Start with a single pane
         let pane_tree = PaneNode::new_leaf(0, cols, rows, shell)?;
 
@@ -74,13 +72,12 @@ impl Tab {
         // This ensures inactive panes continue to show live updates
         let panes = self.pane_tree.all_panes_mut();
         let mut total_bytes = 0;
-        for (pane_id, pane) in panes {
-            log::trace!("Tab {}: Processing output from pane {}", self.id, pane_id);
+        for (_pane_id, pane) in panes {
             // Ignore errors for individual panes (e.g., if PTY is closed)
             match pane.terminal.process_output() {
                 Ok(bytes) => total_bytes += bytes,
                 Err(e) => {
-                    log::debug!("Pane {} output processing error: {}", pane_id, e);
+                    log::debug!("Output processing error: {}", e);
                 }
             }
         }
@@ -107,8 +104,6 @@ impl TabManager {
     }
     
     pub fn new_with_size(shell: String, cols: usize, rows: usize) -> Result<Self> {
-        info!("Creating tab manager with terminal size {}x{}", cols, rows);
-
         // Start with one tab at the specified size
         let mut tab = Tab::new_with_size(0, cols, rows, Some(shell.clone()))?;
 
@@ -134,7 +129,6 @@ impl TabManager {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
 
-        info!("Created new tab: {}", id);
         Ok(id)
     }
 
@@ -145,9 +139,6 @@ impl TabManager {
             if self.active_tab >= self.tabs.len() {
                 self.active_tab = self.tabs.len() - 1;
             }
-            info!("Closed tab: {}", id);
-        } else {
-            info!("Cannot close last tab");
         }
     }
 
@@ -155,7 +146,6 @@ impl TabManager {
     pub fn switch_to_tab(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.active_tab = index;
-            info!("Switched to tab: {}", index);
         }
     }
 
