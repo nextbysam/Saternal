@@ -1,4 +1,5 @@
 use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::Column;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{
@@ -257,7 +258,7 @@ fn update_font_size(config: &mut Config, font_size: f32, renderer: &Arc<Mutex<Re
 fn handle_ctrl_shortcuts(
     keycode: KeyCode,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
-    config: &Config,
+    _config: &Config,
     window: &winit::window::Window,
 ) -> bool {
     match keycode {
@@ -284,8 +285,7 @@ fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>)
     let term_lock = pane.terminal.term().try_lock()?;
 
     let grid = term_lock.grid();
-    let cursor = term_lock.cursor_position();
-    let cursor_line = cursor.line;
+    let cursor_line = grid.cursor.point.line;
 
     // Pre-allocate with reasonable capacity (most commands < 256 chars)
     let mut line = String::with_capacity(256);
