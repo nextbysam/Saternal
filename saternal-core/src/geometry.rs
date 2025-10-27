@@ -134,16 +134,22 @@ impl TerminalGeometry {
     /// - Y: +1.0 (top) to -1.0 (bottom)  [inverted from screen space]
     #[inline]
     pub fn pixels_to_ndc(&self, pixel_x: f32, pixel_y: f32) -> (f32, f32) {
+        if self.window_width == 0 || self.window_height == 0 {
+            return (0.0, 0.0);
+        }
         let ndc_x = (pixel_x / self.window_width as f32) * 2.0 - 1.0;
         let ndc_y = -((pixel_y / self.window_height as f32) * 2.0 - 1.0);
         (ndc_x, ndc_y)
     }
 
     /// Convert pixel dimensions to NDC dimensions
+    ///
+    /// Returns positive extents for both width and height.
+    /// Coordinate system orientation (Y-flip) should be handled separately in transform code.
     #[inline]
     pub fn pixel_size_to_ndc(&self, width: f32, height: f32) -> (f32, f32) {
         let ndc_width = (width / self.window_width as f32) * 2.0;
-        let ndc_height = -((height / self.window_height as f32) * 2.0);
+        let ndc_height = (height / self.window_height as f32) * 2.0;
         (ndc_width, ndc_height)
     }
 

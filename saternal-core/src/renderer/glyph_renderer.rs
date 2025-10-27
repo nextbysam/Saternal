@@ -8,7 +8,11 @@ use alacritty_terminal::term::Term;
 use anyhow::Result;
 use wgpu;
 
-use super::glyph_atlas::{GlyphAtlas, GlyphUV};
+use super::glyph_atlas::GlyphAtlas;
+
+// Maximum instance buffer capacity to prevent unbounded memory growth
+const MAX_INSTANCE_CAPACITY: usize = 100_000;
+const INITIAL_INSTANCE_CAPACITY: usize = 10_000;
 
 /// Instance data for a single glyph (sent to GPU)
 #[repr(C)]
@@ -190,7 +194,7 @@ impl GlyphRenderer {
         });
 
         // Create instance buffer (initial capacity: 10,000 glyphs)
-        let instance_capacity = 10_000;
+        let instance_capacity = INITIAL_INSTANCE_CAPACITY.min(MAX_INSTANCE_CAPACITY);
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Glyph Instance Buffer"),
             size: (instance_capacity * std::mem::size_of::<GlyphInstance>()) as u64,
@@ -271,8 +275,11 @@ impl GlyphRenderer {
 
                 // Get or add glyph to atlas
                 let glyph_uv = match atlas.get_or_add_glyph(device, queue, font_manager, c) {
-                    Some(uv) => uv,
-                    None => continue, // Skip if glyph cannot be added
+                    Ok(uv) => uv,
+                    Err(e) => {
+                        log::warn!("Failed to get/add glyph '{}': {}", c, e);
+                        continue; // Skip if glyph cannot be added
+                    }
                 };
 
                 // Get color from palette
@@ -310,11 +317,68 @@ impl GlyphRenderer {
             }
         }
 
-        self.instance_count = instances.len();
+        // Validate instance count against capacity before assignment
+        let instances_len = instances.len();
+        
+        // Check if buffer needs resizing
+        if instances_len > self.instance_capacity {
+            // Double capacity to avoid frequent reallocations, but cap at MAX_INSTANCE_CAPACITY
+            let new_capacity = std::cmp::min(
+                MAX_INSTANCE_CAPACITY,
+                std::cmp::max(
+                    instances_len,
+                    self.instance_capacity * 2
+                )
+            );
+            
+            log::info!(
+                "Resizing instance buffer from {} to {} glyphs (required: {})",
+                self.instance_capacity,
+                new_capacity,
+                self.instance_count
+            );
+            
+            self.instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Glyph Instance Buffer"),
+                size: (new_capacity * std::mem::size_of::<GlyphInstance>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            
+            self.instance_capacity = new_capacity;
+        }
 
-        // Upload instances to GPU
-        if !instances.is_empty() {
-            queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+        // Clamp instances to fit within buffer capacity to prevent overflow
+        let safe_instance_count = instances_len.min(self.instance_capacity);
+        
+        if safe_instance_count < instances_len {
+            log::warn!(
+                "Truncating {} instances to capacity {} to prevent buffer overflow",
+                instances_len,
+                self.instance_capacity
+            );
+        }
+        
+        // Update instance count with validated value
+        self.instance_count = safe_instance_count;
+
+        // Upload instances to GPU with bounds checking
+        if safe_instance_count > 0 {
+            let safe_instances = &instances[..safe_instance_count];
+            let buffer_size = (self.instance_capacity * std::mem::size_of::<GlyphInstance>()) as u64;
+            let write_size = (safe_instance_count * std::mem::size_of::<GlyphInstance>()) as u64;
+            
+            // Double-check write size doesn't exceed buffer size
+            if write_size <= buffer_size {
+                queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(safe_instances));
+            } else {
+                log::error!(
+                    "Buffer write would overflow: write_size={} > buffer_size={}",
+                    write_size,
+                    buffer_size
+                );
+                return Err(anyhow::anyhow!("Instance buffer overflow prevented"));
+            }
         }
 
         log::debug!("Generated {} glyph instances", self.instance_count);

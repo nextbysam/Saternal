@@ -183,8 +183,7 @@ impl GlyphAtlas {
 
         // Check if atlas is full
         if self.pack_y + glyph_height + 2 > self.atlas_height {
-            log::warn!("Glyph atlas is full, cannot add '{}'", c);
-            return Ok(()); // Silently fail for now
+            anyhow::bail!("Glyph atlas is full, cannot add '{}'", c);
         }
 
         // Upload glyph bitmap to atlas
@@ -251,11 +250,12 @@ impl GlyphAtlas {
         queue: &wgpu::Queue,
         font_manager: &FontManager,
         c: char,
-    ) -> Option<&GlyphUV> {
+    ) -> Result<&GlyphUV> {
         if !self.glyph_map.contains_key(&c) {
-            let _ = self.add_glyph(device, queue, font_manager, c);
+            self.add_glyph(device, queue, font_manager, c)?;
         }
         self.glyph_map.get(&c)
+            .ok_or_else(|| anyhow::anyhow!("Glyph '{}' not found in atlas after add attempt", c))
     }
 
     /// Get atlas dimensions

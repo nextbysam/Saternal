@@ -298,8 +298,8 @@ impl PaneViewport {
             window_height: self.height,
             padding_left: self.x as f32 + padding_left,
             padding_top: self.y as f32 + padding_top,
-            padding_right: padding_left,
-            padding_bottom: padding_top,
+            padding_right: self.x as f32 + padding_left + self.width,
+            padding_bottom: self.y as f32 + padding_top + self.height,
             grid_cols,
             grid_lines,
         }

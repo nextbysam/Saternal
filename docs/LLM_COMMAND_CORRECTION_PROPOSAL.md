@@ -1,8 +1,9 @@
-# LLM-Assisted Command Correction Proposal
+# Natural Language Command Generation
 ## saternal-core PTY Enhancement
 
 **Status**: Proposal
 **Created**: 2025-10-27
+**Updated**: 2025-10-27
 **Author**: Research & Architecture Document
 
 ---
@@ -10,36 +11,42 @@
 ## 1. Overview & Goals
 
 ### Feature Description
-Add intelligent command correction to the saternal-core PTY shell that detects failed commands and offers LLM-powered suggestions to users. When a command fails, the system prompts the user to send it through an LLM for analysis, receives corrected command suggestions, and executes them upon user approval.
+Add natural language command generation to the saternal terminal that allows users to describe what they want to do in plain English, and the system translates it into executable shell commands using an LLM. Users type natural language prompts, the system sends them to Claude via OpenRouter API, receives generated shell commands, and executes them upon user approval.
 
 ### Goals
-- **Non-intrusive**: Only activates when commands fail
-- **User-controlled**: Requires explicit opt-in for both LLM query and command execution
-- **Transparent**: Shows all suggested commands before execution
-- **Fast**: Minimal latency impact on normal terminal operations
+- **Natural interaction**: Type commands in plain English without memorizing syntax
+- **User-controlled**: Requires explicit confirmation before executing any command
+- **Transparent**: Shows all generated commands before execution
+- **Fast**: Minimal latency, streaming responses where possible
 - **Safe**: Never auto-executes commands without user confirmation
+- **Context-aware**: Uses current directory, shell state, and environment
 
 ### Use Cases
 ```bash
-# Typo in command
-$ gti status
-command not found: gti
-→ Run through LLM? [y/n]: y
-→ Suggested: git status
+# File operations
+$ list all files modified in the last 24 hours
+→ Suggested: find . -type f -mtime -1 -ls
 → Execute? [y/n]: y
 
-# Missing permissions
-$ ./script.sh
-Permission denied
-→ Run through LLM? [y/n]: y
-→ Suggested: chmod +x ./script.sh && ./script.sh
+# Git workflows
+$ show me the commit history for the last week
+→ Suggested: git log --since="1 week ago" --oneline
 → Execute? [y/n]: y
 
-# Wrong flag syntax
-$ grep --recusive "pattern" file.txt
-grep: unrecognized option '--recusive'
-→ Run through LLM? [y/n]: y
-→ Suggested: grep --recursive "pattern" file.txt
+# System operations
+$ find and kill all node processes
+→ Suggested: pkill -9 node
+⚠️  WARNING: This command will terminate processes
+→ Execute? [y/n]: y
+
+# Complex tasks
+$ create a backup of my home directory to an external drive
+→ Suggested: rsync -av --progress ~/. /Volumes/Backup/home_backup/
+→ Execute? [y/n]: y
+
+# Text processing
+$ count how many lines of rust code are in this project
+→ Suggested: find . -name "*.rs" -type f -exec wc -l {} + | awk '{s+=$1} END {print s}'
 → Execute? [y/n]: y
 ```
 
@@ -51,148 +58,129 @@ grep: unrecognized option '--recusive'
 
 ```mermaid
 graph TD
-    A[User Types Command] --> B[PTY Stdin]
-    B --> C[Shell Process]
-    C --> D[PTY Stdout/Stderr]
-    D --> E[Terminal Output Parser]
-    E --> F{Error Detected?}
-    F -->|No Error| G[Display Output]
-    F -->|Error Found| H[Error Detection Module]
-    H --> I{Ask User: Run LLM?}
-    I -->|No| G
-    I -->|Yes| J[LLM Client]
-    J --> K[OpenRouter API Claude]
-    K --> L[Parse LLM Response]
-    L --> M[Display Suggestions]
-    M --> N{Ask User: Execute?}
-    N -->|No| G
-    N -->|Yes| O[Write to PTY Stdin]
-    O --> B
+    A[User Types Natural Language] --> B[PTY Stdin]
+    B --> C[Input Handler]
+    C --> D{NL Command?}
+    D -->|Regular Command| E[Pass to Shell]
+    D -->|Natural Language| F[LLM Client]
+    F --> G[OpenRouter API Claude]
+    G --> H[Parse LLM Response]
+    H --> I[Display Suggested Commands]
+    I --> J{Ask User: Execute?}
+    J -->|No| K[Return to Prompt]
+    J -->|Yes| L[Write Commands to PTY Stdin]
+    L --> E
+    E --> M[Shell Executes]
+    M --> N[PTY Stdout]
+    N --> O[Display Output]
 ```
 
 ### Data Flow
 
-1. **Command Execution Phase**
-   - User types command → PTY stdin
-   - Terminal tracks command in buffer
-   - Shell executes → Output to PTY stdout/stderr
+1. **Input Detection Phase**
+   - User types text and presses Enter
+   - System reads current line from terminal grid
+   - Heuristic detection: Does it look like natural language vs shell command?
+   - Natural language indicators: question words (how, what, when), complete sentences, no common command patterns
 
-2. **Error Detection Phase** (Hybrid Approach)
-   - **Pattern Matching**: Parse stdout/stderr for error patterns
-   - **Exit Code Monitoring**: Track shell process exit codes (non-zero = potential failure)
-   - Combine both methods for accuracy
+2. **LLM Query Phase** (For natural language)
+   - Gather context: current directory, shell type, recent commands
+   - Build prompt with user's request + context
+   - Send to Claude via OpenRouter API
+   - Parse response to extract shell command(s)
 
-3. **LLM Query Phase** (User-initiated)
-   - Prompt user: "Command failed. Run through LLM? [y/n]"
-   - If yes: Send failed command + error output to LLM
-   - LLM analyzes and returns corrected command(s)
+3. **Command Presentation Phase**
+   - Display suggested command(s) with syntax highlighting
+   - Show any warnings (destructive operations, sudo required, etc.)
+   - Prompt user for confirmation: "Execute? [y/n]"
 
 4. **Execution Phase** (User-confirmed)
-   - Display suggested command(s) to user
-   - Prompt: "Execute suggested command? [y/n]"
-   - If yes: Write command to PTY stdin
+   - If yes: Write command to PTY stdin (as if user typed it)
    - Command executes normally in shell
+   - Output flows back through PTY stdout
+   - If no: Return to prompt, don't execute
 
 ---
 
-## 3. Error Detection Strategy
+## 3. Natural Language Detection Strategy
 
-### Hybrid Detection Approach
+### Heuristic Approach
 
-#### Method 1: Pattern Matching (Immediate)
-Fast detection by parsing PTY output for known error patterns.
+The system must distinguish between:
+- **Shell commands**: `git status`, `ls -la`, `cd /tmp`
+- **Natural language**: `list all files`, `show me git status`, `change to tmp directory`
 
-**Common Shell Error Patterns:**
+**Detection Criteria:**
+
 ```rust
-const ERROR_PATTERNS: &[&str] = &[
-    // Command not found
-    "command not found",
-    "not found",
-    "No such file or directory",
+pub struct NLDetector {
+    // Words that indicate natural language queries
+    question_words: Vec<&'static str>,
+    // Common shell commands (if line starts with these, it's likely a command)
+    common_commands: Vec<&'static str>,
+}
 
-    // Permission errors
-    "Permission denied",
-    "permission denied",
-    "Operation not permitted",
+impl NLDetector {
+    fn is_natural_language(&self, line: &str) -> bool {
+        let line_lower = line.to_lowercase();
 
-    // Syntax errors
-    "syntax error",
-    "unexpected token",
-    "unrecognized option",
-    "invalid option",
+        // Check 1: Starts with question word
+        if self.question_words.iter().any(|w| line_lower.starts_with(w)) {
+            return true;
+        }
 
-    // Path/file errors
-    "cannot access",
-    "does not exist",
-    "No such command",
+        // Check 2: Contains question mark
+        if line.contains('?') {
+            return true;
+        }
 
-    // Python/Ruby/Node specific
-    "ModuleNotFoundError",
-    "SyntaxError:",
-    "Error:",
-    "ENOENT",
+        // Check 3: Multiple words with articles/conjunctions (natural language patterns)
+        let has_articles = ["the", "a", "an", "my", "all", "some"]
+            .iter()
+            .any(|w| line_lower.contains(w));
+
+        let word_count = line.split_whitespace().count();
+        if has_articles && word_count > 3 {
+            return true;
+        }
+
+        // Check 4: Starts with known shell command = not natural language
+        let first_word = line.split_whitespace().next().unwrap_or("");
+        if self.common_commands.contains(&first_word) {
+            return false;
+        }
+
+        // Default: if more than 5 words, likely natural language
+        word_count > 5
+    }
+}
+
+const QUESTION_WORDS: &[&str] = &[
+    "how", "what", "when", "where", "why", "who",
+    "show", "list", "find", "search", "get", "display",
+    "tell", "explain", "help", "can you",
+];
+
+const COMMON_COMMANDS: &[&str] = &[
+    "ls", "cd", "pwd", "cat", "echo", "grep", "find", "git",
+    "npm", "cargo", "python", "node", "curl", "wget", "ssh",
+    "mkdir", "rm", "cp", "mv", "touch", "vim", "nano",
 ];
 ```
 
-**Shell-Specific Patterns:**
-```rust
-// bash/zsh
-r"bash: .+: command not found"
-r"zsh: command not found: .+"
+### Alternative: Explicit Trigger
 
-// Fish
-r"fish: Unknown command"
+Instead of automatic detection, use an explicit prefix:
 
-// Generic
-r": not found$"
-r"^.*: No such file or directory$"
+```bash
+$ nl: list all files modified today
+# or
+$ ? list all files modified today
+# or
+$ ask: show me git status
 ```
 
-#### Method 2: Exit Code Monitoring (Reliable)
-Track command execution status through shell exit codes.
-
-**Exit Code Semantics:**
-- `0` - Success (no error)
-- `1` - General errors
-- `2` - Misuse of shell command
-- `126` - Command cannot execute (permission)
-- `127` - Command not found
-- `128+N` - Fatal error signal N
-
-**Implementation Strategy:**
-```rust
-struct CommandExecution {
-    command: String,
-    output: Vec<String>,  // Lines of stdout/stderr
-    exit_code: Option<i32>,
-    error_detected: bool,
-}
-
-impl CommandExecution {
-    fn has_error(&self) -> bool {
-        // Hybrid check
-        self.exit_code.map_or(false, |code| code != 0)
-            || self.output_contains_error_pattern()
-    }
-}
-```
-
-### Detection Timing
-
-**Challenge**: Shell output is asynchronous and may not include exit codes directly.
-
-**Solutions:**
-1. **Prompt Detection**: Monitor for shell prompt return (PS1)
-   - When prompt appears, last command completed
-   - Check buffered output for errors
-
-2. **Timeout-Based**: Set reasonable timeout (500ms)
-   - After command submission, wait for output to settle
-   - Analyze accumulated output for error patterns
-
-3. **Exit Code Injection** (Advanced):
-   - Modify shell config to include exit code in prompt
-   - Parse: `[EXIT:127]` markers from output
+This removes ambiguity and gives users explicit control.
 
 ---
 
@@ -202,101 +190,93 @@ impl CommandExecution {
 
 ```
 ┌─────────────────────────────────────────┐
-│  User enters command:                   │
-│  $ gti status                           │
+│  User enters natural language:          │
+│  $ show me all running processes        │
 └─────────────┬───────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────┐
-│  Shell executes → Error output:         │
-│  zsh: command not found: gti            │
-└─────────────┬───────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────┐
-│  Error Detector identifies failure      │
-│  Pattern: "command not found"           │
+│  NL Detector identifies natural language│
 └─────────────┬───────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────┐
 │  Display to user:                       │
-│  → Command failed. Run through LLM?     │
-│     [y/n]:                              │
+│  🤖 Generating command with Claude...   │
 └─────────────┬───────────────────────────┘
               │
-        ┌─────┴─────┐
-        │           │
-       No          Yes
-        │           │
-        ▼           ▼
-     [Exit]   ┌─────────────────────────────┐
-              │  Sending to LLM...          │
-              │  (Show loading indicator)   │
-              └──────────┬──────────────────┘
-                         │
-                         ▼
-              ┌─────────────────────────────┐
-              │  LLM Response received:     │
-              │  Suggested command:         │
-              │  $ git status               │
-              └──────────┬──────────────────┘
-                         │
-                         ▼
-              ┌─────────────────────────────┐
-              │  Execute suggested command? │
-              │  [y/n]:                     │
-              └──────────┬──────────────────┘
-                         │
-                   ┌─────┴─────┐
-                   │           │
-                  No          Yes
-                   │           │
-                   ▼           ▼
-                [Exit]   ┌─────────────────┐
-                         │  Execute: git   │
-                         │  status         │
-                         └─────────────────┘
+              ▼
+┌─────────────────────────────────────────┐
+│  LLM Response received:                 │
+│  Suggested command:                     │
+│  $ ps aux | less                        │
+└──────────┬──────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────┐
+│  Execute suggested command? [y/n]:      │
+└──────────┬──────────────────────────────┘
+           │
+     ┌─────┴─────┐
+     │           │
+    No          Yes
+     │           │
+     ▼           ▼
+  [Exit]   ┌─────────────────┐
+           │  Write to PTY:  │
+           │  ps aux | less  │
+           └────────┬─────────┘
+                    │
+                    ▼
+           ┌─────────────────┐
+           │  Shell executes │
+           │  Output shown   │
+           └─────────────────┘
 ```
 
 ### Terminal UI Messages
 
-**Error Detected:**
-```
-zsh: command not found: gti
-╭─────────────────────────────────────────────╮
-│  ⚠ Command failed                          │
-│  Run through LLM for suggestions? (y/n)    │
-╰─────────────────────────────────────────────╯
-```
-
-**LLM Processing:**
+**Processing:**
 ```
 ╭─────────────────────────────────────────────╮
-│  🤖 Analyzing command with Claude...       │
+│  🤖 Generating command with Claude...       │
 ╰─────────────────────────────────────────────╯
 ```
 
 **Suggestion Display:**
 ```
 ╭─────────────────────────────────────────────╮
-│  💡 Suggested correction:                  │
-│                                            │
-│  $ git status                              │
-│                                            │
-│  Execute this command? (y/n)               │
+│  💡 Suggested command:                      │
+│                                             │
+│  $ find . -type f -mtime -1 -ls            │
+│                                             │
+│  Execute this command? [y/n]                │
 ╰─────────────────────────────────────────────╯
 ```
 
 **Multi-Command Suggestions:**
 ```
 ╭─────────────────────────────────────────────╮
-│  💡 Suggested corrections:                 │
-│                                            │
-│  1. chmod +x ./script.sh                   │
-│  2. ./script.sh                            │
-│                                            │
-│  Execute all? (y/n)                        │
+│  💡 Suggested commands:                     │
+│                                             │
+│  1. git add .                               │
+│  2. git commit -m "Update files"            │
+│  3. git push                                │
+│                                             │
+│  Execute all? [y/n/c]                       │
+│  (c = choose which to run)                  │
+╰─────────────────────────────────────────────╯
+```
+
+**Warning for Dangerous Commands:**
+```
+╭─────────────────────────────────────────────╮
+│  ⚠️  WARNING: Potentially destructive!      │
+│                                             │
+│  $ rm -rf /path/to/directory                │
+│                                             │
+│  This will permanently delete files.        │
+│  Type 'yes' to confirm:                     │
 ╰─────────────────────────────────────────────╯
 ```
 
@@ -304,118 +284,69 @@ zsh: command not found: gti
 
 ## 5. Implementation Components
 
-### 5.1 Error Detection Module
+### 5.1 Natural Language Detector
 
-**File**: `saternal-core/src/command_error.rs`
+**File**: `saternal-core/src/nl_detector.rs`
 
 ```rust
-use regex::Regex;
-use lazy_static::lazy_static;
-
-/// Error detection result
-#[derive(Debug, Clone)]
-pub struct CommandError {
-    pub command: String,
-    pub error_output: String,
-    pub error_type: ErrorType,
-    pub exit_code: Option<i32>,
+/// Detects if user input is natural language vs shell command
+pub struct NLDetector {
+    question_words: Vec<String>,
+    common_commands: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ErrorType {
-    CommandNotFound,
-    PermissionDenied,
-    SyntaxError,
-    FileNotFound,
-    InvalidOption,
-    Generic,
-}
-
-lazy_static! {
-    static ref ERROR_PATTERNS: Vec<(Regex, ErrorType)> = vec![
-        (Regex::new(r"command not found|not found").unwrap(), ErrorType::CommandNotFound),
-        (Regex::new(r"[Pp]ermission denied|Operation not permitted").unwrap(), ErrorType::PermissionDenied),
-        (Regex::new(r"syntax error|unexpected token").unwrap(), ErrorType::SyntaxError),
-        (Regex::new(r"No such file or directory|does not exist").unwrap(), ErrorType::FileNotFound),
-        (Regex::new(r"unrecognized option|invalid option").unwrap(), ErrorType::InvalidOption),
-    ];
-}
-
-pub struct ErrorDetector {
-    output_buffer: Vec<String>,
-    last_command: Option<String>,
-}
-
-impl ErrorDetector {
+impl NLDetector {
     pub fn new() -> Self {
         Self {
-            output_buffer: Vec::new(),
-            last_command: None,
+            question_words: vec![
+                "how", "what", "when", "where", "why", "who",
+                "show", "list", "find", "search", "get", "display",
+                "tell", "explain", "help", "can you",
+            ].into_iter().map(String::from).collect(),
+
+            common_commands: vec![
+                "ls", "cd", "pwd", "cat", "echo", "grep", "find", "git",
+                "npm", "cargo", "python", "node", "curl", "wget", "ssh",
+                "mkdir", "rm", "cp", "mv", "touch", "vim", "nano",
+            ].into_iter().map(String::from).collect(),
         }
     }
 
-    /// Add output line to buffer for analysis
-    pub fn add_output(&mut self, line: &str) {
-        self.output_buffer.push(line.to_string());
+    /// Check if input looks like natural language
+    pub fn is_natural_language(&self, line: &str) -> bool {
+        let line_lower = line.to_lowercase();
+        let words: Vec<&str> = line.split_whitespace().collect();
 
-        // Keep buffer size reasonable (last 50 lines)
-        if self.output_buffer.len() > 50 {
-            self.output_buffer.remove(0);
-        }
-    }
-
-    /// Track the command being executed
-    pub fn set_command(&mut self, command: String) {
-        self.last_command = Some(command);
-        self.output_buffer.clear();
-    }
-
-    /// Check if recent output indicates an error
-    pub fn detect_error(&self) -> Option<CommandError> {
-        let recent_output = self.output_buffer.join("\n");
-
-        // Pattern matching
-        for (pattern, error_type) in ERROR_PATTERNS.iter() {
-            if pattern.is_match(&recent_output) {
-                return Some(CommandError {
-                    command: self.last_command.clone().unwrap_or_default(),
-                    error_output: recent_output.clone(),
-                    error_type: error_type.clone(),
-                    exit_code: None,
-                });
-            }
+        if words.is_empty() {
+            return false;
         }
 
-        None
-    }
-
-    /// Check error with exit code (hybrid approach)
-    pub fn check_with_exit_code(&self, exit_code: i32) -> Option<CommandError> {
-        // Non-zero exit code = error
-        if exit_code != 0 {
-            let error_type = match exit_code {
-                127 => ErrorType::CommandNotFound,
-                126 => ErrorType::PermissionDenied,
-                2 => ErrorType::SyntaxError,
-                _ => ErrorType::Generic,
-            };
-
-            return Some(CommandError {
-                command: self.last_command.clone().unwrap_or_default(),
-                error_output: self.output_buffer.join("\n"),
-                error_type,
-                exit_code: Some(exit_code),
-            });
+        // Question mark = natural language
+        if line.contains('?') {
+            return true;
         }
 
-        // Even with exit code 0, check patterns (some tools don't exit properly)
-        self.detect_error()
-    }
+        // Starts with question word
+        if self.question_words.iter().any(|w| line_lower.starts_with(w)) {
+            return true;
+        }
 
-    /// Clear state after processing
-    pub fn clear(&mut self) {
-        self.output_buffer.clear();
-        self.last_command = None;
+        // Starts with known command = NOT natural language
+        if self.common_commands.contains(&words[0].to_string()) {
+            return false;
+        }
+
+        // Contains articles + multiple words
+        let has_articles = ["the", "a", "an", "my", "all", "some", "every"]
+            .iter()
+            .any(|w| words.contains(w));
+
+        if has_articles && words.len() > 3 {
+            return true;
+        }
+
+        // More than 5 words = likely natural language
+        words.len() > 5
     }
 }
 
@@ -424,25 +355,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_command_not_found() {
-        let mut detector = ErrorDetector::new();
-        detector.set_command("gti status".to_string());
-        detector.add_output("zsh: command not found: gti");
+    fn test_natural_language_detection() {
+        let detector = NLDetector::new();
 
-        let error = detector.detect_error();
-        assert!(error.is_some());
-        assert_eq!(error.unwrap().error_type, ErrorType::CommandNotFound);
-    }
+        // Natural language
+        assert!(detector.is_natural_language("show me all files"));
+        assert!(detector.is_natural_language("how do I list files?"));
+        assert!(detector.is_natural_language("find all rust files in this project"));
+        assert!(detector.is_natural_language("what is my current directory"));
 
-    #[test]
-    fn test_permission_denied() {
-        let mut detector = ErrorDetector::new();
-        detector.set_command("./script.sh".to_string());
-        detector.add_output("bash: ./script.sh: Permission denied");
-
-        let error = detector.detect_error();
-        assert!(error.is_some());
-        assert_eq!(error.unwrap().error_type, ErrorType::PermissionDenied);
+        // Shell commands
+        assert!(!detector.is_natural_language("ls -la"));
+        assert!(!detector.is_natural_language("git status"));
+        assert!(!detector.is_natural_language("cd /tmp"));
+        assert!(!detector.is_natural_language("grep pattern file.txt"));
     }
 }
 ```
@@ -455,7 +381,7 @@ mod tests {
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// LLM client for command correction
+/// LLM client for natural language to command translation
 pub struct LLMClient {
     api_key: String,
     base_url: String,
@@ -487,7 +413,7 @@ struct Choice {
 }
 
 impl LLMClient {
-    /// Create new LLM client (OpenRouter with Claude default)
+    /// Create new LLM client (OpenRouter with Claude)
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
@@ -496,35 +422,43 @@ impl LLMClient {
         }
     }
 
-    /// Get command suggestions from LLM
-    pub async fn get_command_suggestions(
+    /// Generate shell command from natural language
+    pub async fn generate_command(
         &self,
-        failed_command: &str,
-        error_output: &str,
+        natural_language: &str,
+        context: &CommandContext,
     ) -> Result<Vec<String>> {
-        let prompt = self.build_prompt(failed_command, error_output);
+        let prompt = self.build_prompt(natural_language, context);
         let response = self.query_llm(&prompt).await?;
         let commands = self.parse_commands(&response)?;
 
         Ok(commands)
     }
 
-    fn build_prompt(&self, command: &str, error: &str) -> String {
+    fn build_prompt(&self, nl: &str, context: &CommandContext) -> String {
         format!(
-            r#"A shell command failed with an error. Analyze it and provide a corrected command.
+            r#"You are a shell command generator. Convert natural language requests into executable shell commands.
 
-FAILED COMMAND:
+CONTEXT:
+- Shell: {}
+- Current Directory: {}
+- OS: {}
+
+USER REQUEST:
 {}
 
-ERROR OUTPUT:
-{}
+INSTRUCTIONS:
+1. Generate ONLY valid shell commands for the user's shell
+2. Output one command per line
+3. No explanations, no markdown, no comments
+4. If multiple steps needed, output them in order
+5. Prefer safe, non-destructive commands when possible
 
-Please respond with ONLY the corrected shell command(s), one per line.
-Do not include explanations or markdown formatting.
-If multiple commands are needed (e.g., chmod then execute), list them in order.
-
-CORRECTED COMMAND(S):"#,
-            command, error
+COMMANDS:"#,
+            context.shell,
+            context.current_dir,
+            context.os,
+            nl
         )
     }
 
@@ -539,8 +473,8 @@ CORRECTED COMMAND(S):"#,
                     content: prompt.to_string(),
                 }
             ],
-            max_tokens: 256,
-            temperature: 0.1, // Low temperature for deterministic corrections
+            max_tokens: 512,
+            temperature: 0.2, // Low for deterministic commands
         };
 
         let response = client
@@ -571,7 +505,8 @@ CORRECTED COMMAND(S):"#,
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty())
-            .filter(|line| !line.starts_with('#')) // Filter comments
+            .filter(|line| !line.starts_with('#'))  // Filter comments
+            .filter(|line| !line.starts_with("```")) // Filter markdown
             .map(|line| line.to_string())
             .collect();
 
@@ -583,6 +518,26 @@ CORRECTED COMMAND(S):"#,
     }
 }
 
+/// Context for command generation
+pub struct CommandContext {
+    pub shell: String,
+    pub current_dir: String,
+    pub os: String,
+}
+
+impl CommandContext {
+    pub fn gather() -> Self {
+        Self {
+            shell: std::env::var("SHELL")
+                .unwrap_or_else(|_| "bash".to_string()),
+            current_dir: std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "~".to_string()),
+            os: std::env::consts::OS.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,186 +546,277 @@ mod tests {
     fn test_parse_commands() {
         let client = LLMClient::new("test_key".to_string());
 
-        let response = "git status\n";
+        let response = "find . -name '*.rs'\nwc -l";
         let commands = client.parse_commands(response).unwrap();
-        assert_eq!(commands, vec!["git status"]);
-
-        let response = "chmod +x script.sh\n./script.sh\n";
-        let commands = client.parse_commands(response).unwrap();
-        assert_eq!(commands, vec!["chmod +x script.sh", "./script.sh"]);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0], "find . -name '*.rs'");
+        assert_eq!(commands[1], "wc -l");
     }
 
     #[test]
     fn test_prompt_building() {
         let client = LLMClient::new("test_key".to_string());
-        let prompt = client.build_prompt("gti status", "command not found: gti");
+        let context = CommandContext {
+            shell: "zsh".to_string(),
+            current_dir: "/Users/sam/project".to_string(),
+            os: "macos".to_string(),
+        };
 
-        assert!(prompt.contains("gti status"));
-        assert!(prompt.contains("command not found"));
+        let prompt = client.build_prompt("list all files", &context);
+        assert!(prompt.contains("zsh"));
+        assert!(prompt.contains("/Users/sam/project"));
+        assert!(prompt.contains("list all files"));
     }
 }
 ```
 
-### 5.3 Terminal Integration
+### 5.3 Integration into Commands Module
 
-**File**: `saternal-core/src/terminal.rs` (modifications)
+**File**: `saternal/src/app/commands.rs` (modifications)
 
 ```rust
-use crate::command_error::{ErrorDetector, CommandError};
-use crate::llm_client::LLMClient;
+use saternal_core::llm_client::{LLMClient, CommandContext};
+use saternal_core::nl_detector::NLDetector;
 
-pub struct Terminal {
-    term: Arc<Mutex<Term<TermEventListener>>>,
-    pty: tty::Pty,
-    processor: Processor,
+/// Extended command type to include NL-generated commands
+#[derive(Debug, Clone, PartialEq)]
+pub enum TerminalCommand {
+    // Existing commands
+    Wallpaper { path: Option<String> },
+    WallpaperOpacity { opacity: f32 },
+    BackgroundOpacity { opacity: f32 },
+    BlurStrength { strength: f32 },
 
-    // New fields for command correction
-    error_detector: ErrorDetector,
-    llm_client: Option<LLMClient>,
-    command_buffer: String,
-    awaiting_user_response: bool,
+    // New: Natural language generated command
+    NaturalLanguage {
+        original_request: String,
+        generated_commands: Vec<String>,
+    },
 }
 
-impl Terminal {
-    pub fn new(cols: usize, rows: usize, shell: Option<String>) -> Result<Self> {
-        // ... existing initialization ...
+/// Parse command - now includes NL detection
+pub fn parse_command(
+    line: &str,
+    nl_detector: &NLDetector,
+    llm_client: Option<&LLMClient>,
+) -> Option<CommandType> {
+    let line = line.trim();
 
-        // Initialize error detector
-        let error_detector = ErrorDetector::new();
-
-        // Initialize LLM client if API key available
-        let llm_client = std::env::var("OPENROUTER_API_KEY")
-            .ok()
-            .map(|key| LLMClient::new(key));
-
-        Ok(Self {
-            term,
-            pty,
-            processor,
-            error_detector,
-            llm_client,
-            command_buffer: String::new(),
-            awaiting_user_response: false,
-        })
+    // First check existing commands (wallpaper, etc.)
+    if let Some(cmd) = parse_builtin_command(line) {
+        return Some(CommandType::Builtin(cmd));
     }
 
-    /// Write input to terminal (modified to track commands)
-    pub fn write_input(&mut self, data: &[u8]) -> Result<()> {
-        use std::io::Write;
+    // Check if natural language and LLM available
+    if nl_detector.is_natural_language(line) && llm_client.is_some() {
+        return Some(CommandType::NaturalLanguage(line.to_string()));
+    }
 
-        // Track command input
-        if let Ok(text) = std::str::from_utf8(data) {
-            if text.contains('\n') || text.contains('\r') {
-                // Command submitted
-                let command = self.command_buffer.clone();
-                self.error_detector.set_command(command);
-                self.command_buffer.clear();
-            } else {
-                self.command_buffer.push_str(text);
+    None
+}
+
+pub enum CommandType {
+    Builtin(TerminalCommand),
+    NaturalLanguage(String),
+}
+
+fn parse_builtin_command(line: &str) -> Option<TerminalCommand> {
+    // Existing wallpaper/opacity parsing logic
+    // ... (keep all existing code)
+    None
+}
+```
+
+### 5.4 Input Handler Integration
+
+**File**: `saternal/src/app/input.rs` (modifications)
+
+```rust
+// Add to handle_terminal_input function
+
+if bytes == b"\r" || bytes == b"\n" {  // Enter key
+    if let Some(line) = read_current_line_from_grid(tab_manager) {
+        // Initialize NL detector (or get from app state)
+        let nl_detector = NLDetector::new();
+        let llm_client = get_llm_client(); // Get from app state
+
+        match parse_command(&line, &nl_detector, llm_client.as_ref()) {
+            Some(CommandType::Builtin(cmd)) => {
+                // Execute builtin command (existing logic)
+                execute_builtin_command(cmd, renderer, window);
+                return true;
+            }
+            Some(CommandType::NaturalLanguage(nl_request)) => {
+                // Handle natural language command
+                handle_natural_language_command(
+                    nl_request,
+                    tab_manager,
+                    llm_client.as_ref().unwrap(),
+                ).await;
+                return true;
+            }
+            None => {
+                // Not a command, pass to shell
             }
         }
-
-        self.pty.writer().write_all(data)?;
-        Ok(())
     }
+}
 
-    /// Process output (modified to detect errors)
-    pub fn process_output(&mut self) -> Result<usize> {
-        use std::io::Read;
+// Pass to terminal
+if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+    let _ = active_tab.write_input(&bytes);
+}
+```
 
-        let mut buf = [0u8; 4096];
-        let mut total_bytes = 0;
+### 5.5 Natural Language Command Handler
 
-        loop {
-            match self.pty.reader().read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    total_bytes += n;
-                    let output = String::from_utf8_lossy(&buf[..n]);
+**File**: `saternal/src/app/nl_handler.rs` (new)
 
-                    // Feed to error detector
-                    for line in output.lines() {
-                        self.error_detector.add_output(line);
-                    }
+```rust
+use saternal_core::llm_client::{LLMClient, CommandContext};
+use crate::tab::TabManager;
 
-                    // Process through terminal
-                    let mut term = self.term.lock();
-                    self.processor.advance(&mut *term, &buf[..n]);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e.into()),
+/// Handle natural language command request
+pub async fn handle_natural_language_command(
+    nl_request: String,
+    tab_manager: &Arc<Mutex<TabManager>>,
+    llm_client: &LLMClient,
+) {
+    // Step 1: Show processing message
+    display_nl_processing_message(tab_manager);
+
+    // Step 2: Generate command
+    let context = CommandContext::gather();
+    let result = llm_client.generate_command(&nl_request, &context).await;
+
+    match result {
+        Ok(commands) => {
+            // Step 3: Display suggestions
+            display_suggestions(tab_manager, &commands);
+
+            // Step 4: Wait for user confirmation
+            // This will be handled by the input handler
+            // Store state in tab_manager for pending execution
+            let mut tab_mgr = tab_manager.lock();
+            if let Some(tab) = tab_mgr.active_tab_mut() {
+                tab.pending_nl_commands = Some(commands);
             }
         }
-
-        // Check for errors after output settles
-        if total_bytes > 0 {
-            if let Some(error) = self.error_detector.detect_error() {
-                self.handle_command_error(error)?;
-            }
+        Err(e) => {
+            display_error_message(tab_manager, &format!("Failed to generate command: {}", e));
         }
+    }
+}
 
-        Ok(total_bytes)
+fn display_nl_processing_message(tab_manager: &Arc<Mutex<TabManager>>) {
+    // Write styled message to terminal
+    let message = "\r\n🤖 Generating command with Claude...\r\n";
+    let mut tab_mgr = tab_manager.lock();
+    if let Some(tab) = tab_mgr.active_tab_mut() {
+        let _ = tab.write_input(message.as_bytes());
+    }
+}
+
+fn display_suggestions(tab_manager: &Arc<Mutex<TabManager>>, commands: &[String]) {
+    let mut message = String::from("\r\n💡 Suggested command(s):\r\n");
+
+    for (i, cmd) in commands.iter().enumerate() {
+        message.push_str(&format!("  {}. {}\r\n", i + 1, cmd));
     }
 
-    /// Handle detected command error
-    fn handle_command_error(&mut self, error: CommandError) -> Result<()> {
-        if self.llm_client.is_none() {
-            return Ok(()); // LLM not configured
-        }
+    message.push_str("\r\nExecute? [y/n]: ");
 
-        // Display prompt to user: "Run through LLM? [y/n]"
-        // This would be implemented in the UI layer
-        self.awaiting_user_response = true;
-
-        // Store error for later processing
-        // (Actual implementation would involve callback to UI)
-
-        Ok(())
+    let mut tab_mgr = tab_manager.lock();
+    if let Some(tab) = tab_mgr.active_tab_mut() {
+        let _ = tab.write_input(message.as_bytes());
     }
+}
 
-    /// User confirmed to run LLM
-    pub async fn run_llm_correction(&mut self, error: CommandError) -> Result<Vec<String>> {
-        let client = self.llm_client.as_ref()
-            .context("LLM client not configured")?;
-
-        let suggestions = client
-            .get_command_suggestions(&error.command, &error.error_output)
-            .await?;
-
-        Ok(suggestions)
-    }
-
-    /// Execute suggested command
-    pub fn execute_suggestion(&mut self, command: &str) -> Result<()> {
-        let command_with_newline = format!("{}\n", command);
-        self.write_input(command_with_newline.as_bytes())?;
-        Ok(())
+fn display_error_message(tab_manager: &Arc<Mutex<TabManager>>, error: &str) {
+    let message = format!("\r\n❌ {}\r\n", error);
+    let mut tab_mgr = tab_manager.lock();
+    if let Some(tab) = tab_mgr.active_tab_mut() {
+        let _ = tab.write_input(message.as_bytes());
     }
 }
 ```
 
 ---
 
-## 6. Code Structure & Files
+## 6. Safety & Security
+
+### Dangerous Command Detection
+
+```rust
+const DANGEROUS_PATTERNS: &[&str] = &[
+    "rm -rf /",
+    "rm -rf /*",
+    "dd if=",
+    "mkfs",
+    "fdisk",
+    "> /dev/sd",
+    "chmod -R 777",
+    "kill -9 -1",
+    ":(){ :|:& };:", // Fork bomb
+];
+
+pub fn is_dangerous_command(cmd: &str) -> bool {
+    DANGEROUS_PATTERNS.iter().any(|pattern| cmd.contains(pattern))
+}
+
+pub fn requires_sudo(cmd: &str) -> bool {
+    cmd.trim_start().starts_with("sudo ")
+}
+```
+
+### User Confirmation Levels
+
+```rust
+pub enum ConfirmationLevel {
+    Standard,   // Simple [y/n]
+    Elevated,   // Type 'yes' to confirm
+    Sudo,       // Warn about privileged access
+}
+
+impl ConfirmationLevel {
+    pub fn for_command(cmd: &str) -> Self {
+        if is_dangerous_command(cmd) {
+            Self::Elevated
+        } else if requires_sudo(cmd) {
+            Self::Sudo
+        } else {
+            Self::Standard
+        }
+    }
+}
+```
+
+---
+
+## 7. Code Structure & Files
 
 ### New Files
 
 ```
 saternal-core/src/
-├── command_error.rs      # Error detection module (NEW)
-├── llm_client.rs         # LLM integration (NEW)
-└── lib.rs                # Export new modules
+├── nl_detector.rs       # Natural language detection (NEW)
+├── llm_client.rs        # LLM integration (NEW)
+└── lib.rs               # Export new modules
+
+saternal/src/app/
+├── nl_handler.rs        # NL command handling (NEW)
+└── commands.rs          # Extend with NL support (MODIFIED)
 ```
 
 ### Modified Files
 
 ```
-saternal-core/src/
-├── terminal.rs           # Add error detection hooks
-└── lib.rs                # Re-export new types
+saternal/src/app/
+├── input.rs             # Add NL command handling
+└── event_loop.rs        # Handle async LLM calls
 
 saternal/src/
-└── app.rs                # Add UI for prompts and suggestions
+└── tab.rs               # Add pending_nl_commands field
 ```
 
 ### Dependencies to Add
@@ -780,9 +826,7 @@ saternal/src/
 [dependencies]
 # Existing dependencies...
 
-# New dependencies for LLM correction
-regex = "1.10"
-lazy_static = "1.4"
+# New dependencies for NL commands
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -793,439 +837,228 @@ tokio = { version = "1.35", features = ["full"] }
 
 **`~/.config/saternal/config.toml`:**
 ```toml
-[llm]
+[nl_commands]
 enabled = true
 provider = "openrouter"
 model = "anthropic/claude-3-5-sonnet"
-# API key should be in environment variable: OPENROUTER_API_KEY
+# API key from environment: OPENROUTER_API_KEY
+
+# Detection mode: "auto" or "explicit"
+# auto: Automatically detect natural language
+# explicit: Require prefix like "nl:" or "?"
+detection_mode = "auto"
+
+# Confirmation required
+require_confirmation = true
 ```
 
 ---
 
-## 7. Error Detection Patterns
+## 8. Implementation Timeline
 
-### Shell-Specific Error Messages
+### Phase 1: Core Infrastructure (Week 1)
+- [ ] Implement `NLDetector` module
+- [ ] Implement `LLMClient` module with OpenRouter integration
+- [ ] Add unit tests for both modules
+- [ ] Add configuration loading
+- [ ] **Milestone**: Can detect NL and query LLM
 
-#### Bash
-```
-bash: command: command not found
-bash: ./script: Permission denied
-bash: syntax error near unexpected token `newline'
-```
+### Phase 2: Terminal Integration (Week 1-2)
+- [ ] Modify `commands.rs` to support NL commands
+- [ ] Integrate into `input.rs` Enter key handler
+- [ ] Implement `nl_handler.rs` for async processing
+- [ ] Add UI messages for processing/suggestions
+- [ ] **Milestone**: End-to-end NL → LLM → Display works
 
-#### Zsh
-```
-zsh: command not found: command
-zsh: permission denied: ./script
-zsh: parse error near `\n'
-```
+### Phase 3: Command Execution (Week 2)
+- [ ] Implement confirmation prompt handling
+- [ ] Write confirmed commands to PTY stdin
+- [ ] Handle multi-command execution
+- [ ] Add proper error handling
+- [ ] **Milestone**: Commands execute in shell
 
-#### Fish
-```
-fish: Unknown command: command
-fish: The file './script' is not executable by this user
-```
-
-### Exit Code Reference
-
-| Code | Meaning | Common Cause |
-|------|---------|--------------|
-| 0 | Success | Command completed |
-| 1 | General error | Various failures |
-| 2 | Misuse | Wrong syntax/arguments |
-| 126 | Cannot execute | Permission denied |
-| 127 | Not found | Command doesn't exist |
-| 128+N | Fatal signal | Killed by signal N |
-| 130 | Ctrl+C | User interrupted |
-
-### Detection Confidence Levels
-
-```rust
-pub enum ConfidenceLevel {
-    High,      // Exit code 127 + "command not found" pattern
-    Medium,    // Either exit code OR pattern matches
-    Low,       // Heuristic match (generic error keywords)
-}
-```
-
-Only trigger LLM for High and Medium confidence errors to avoid false positives.
-
----
-
-## 8. LLM Integration Details
-
-### API Request Structure
-
-**OpenRouter API (Compatible with OpenAI format):**
-```json
-{
-  "model": "anthropic/claude-3-5-sonnet",
-  "messages": [
-    {
-      "role": "user",
-      "content": "A shell command failed...\n\nFAILED COMMAND:\ngti status\n\nERROR OUTPUT:\ncommand not found: gti\n\nPlease respond with ONLY the corrected shell command(s)..."
-    }
-  ],
-  "max_tokens": 256,
-  "temperature": 0.1
-}
-```
-
-### Prompt Engineering
-
-**System Prompt Strategy:**
-```
-You are a shell command correction assistant. When given a failed command and its error output, provide only the corrected command(s) needed to fix the issue.
-
-Rules:
-1. Output ONLY valid shell commands, one per line
-2. No explanations, markdown, or commentary
-3. If multiple steps needed, list them in execution order
-4. Preserve the user's intent while fixing syntax/typos
-5. Consider the shell environment (bash/zsh/fish)
-```
-
-**Example Prompts & Responses:**
-
-| Failed Command | Error | LLM Response |
-|---------------|-------|--------------|
-| `gti status` | command not found: gti | `git status` |
-| `./script.sh` | Permission denied | `chmod +x ./script.sh`<br>`./script.sh` |
-| `grep --recusive "foo" file.txt` | unrecognized option | `grep --recursive "foo" file.txt` |
-| `cd /ect` | No such file | `cd /etc` |
-| `python3 scrip.py` | No such file | `python3 script.py` |
-
-### Response Parsing
-
-**Expected format:**
-```
-command1
-command2
-```
-
-**Edge cases to handle:**
-- LLM adds markdown: Strip ``` code blocks
-- LLM adds explanations: Extract only command lines
-- LLM suggests interactive commands: Warn user
-- LLM response timeout: Show error message
-
----
-
-## 9. Edge Cases & Considerations
-
-### Safety
-
-**Never Auto-Execute:**
-- All commands require explicit user confirmation
-- Display full command before execution
-- Highlight destructive operations (rm, dd, etc.)
-
-**Dangerous Command Detection:**
-```rust
-const DANGEROUS_KEYWORDS: &[&str] = &[
-    "rm -rf", "dd", "mkfs", "fdisk",
-    "shutdown", "reboot", "kill -9",
-    "chmod 777", "> /dev/sda",
-];
-
-fn is_dangerous(command: &str) -> bool {
-    DANGEROUS_KEYWORDS.iter().any(|kw| command.contains(kw))
-}
-```
-
-**Warning UI:**
-```
-╭─────────────────────────────────────────────╮
-│  ⚠️  WARNING: Potentially destructive!     │
-│                                            │
-│  $ rm -rf /important/data                  │
-│                                            │
-│  This command may delete files.            │
-│  Are you SURE? (type 'yes' to confirm)    │
-╰─────────────────────────────────────────────╯
-```
-
-### Performance
-
-**Latency Considerations:**
-- Error detection: <1ms (pattern matching)
-- LLM query: 1-3 seconds (network + inference)
-- Use loading indicators during LLM calls
-- Cache common corrections locally
-
-**Resource Usage:**
-- Minimal memory: Only buffer last command + output
-- No background polling: Event-driven only
-- Network only when user opts in
-
-### Privacy
-
-**Data Sent to LLM:**
-- Failed command string
-- Error output (last ~10 lines)
-- NO environment variables
-- NO command history beyond current failure
-- NO file contents or sensitive paths
-
-**User Control:**
-```toml
-[llm]
-enabled = false  # Completely disable feature
-```
-
-### Error Handling
-
-**LLM API Failures:**
-```rust
-match llm_client.get_suggestions().await {
-    Ok(suggestions) => display_suggestions(suggestions),
-    Err(e) => {
-        eprintln!("LLM request failed: {}", e);
-        eprintln!("Suggestions unavailable. Try again or fix manually.");
-    }
-}
-```
-
-**Malformed Responses:**
-- Validate commands before displaying
-- Reject empty responses
-- Fallback: "Could not generate suggestions"
-
-### Multi-Line Commands
-
-**Challenge:** User may paste multi-line scripts.
-
-**Solution:** Track command boundaries by shell prompts.
-
-```rust
-fn is_shell_prompt(line: &str) -> bool {
-    // Common prompt patterns
-    line.ends_with("$ ") ||
-    line.ends_with("% ") ||
-    line.contains("@") && line.ends_with("> ")
-}
-```
-
----
-
-## 10. Implementation Timeline
-
-### Phase 1: Core Error Detection (Week 1)
-- [ ] Implement `ErrorDetector` module
-- [ ] Add pattern matching for common errors
-- [ ] Integrate into `Terminal::process_output()`
-- [ ] Add unit tests
-- [ ] **Milestone**: Terminal detects errors and logs them
-
-### Phase 2: LLM Client Integration (Week 1-2)
-- [ ] Implement `LLMClient` module
-- [ ] Add OpenRouter API integration
-- [ ] Implement prompt engineering
-- [ ] Add response parsing
-- [ ] Handle API errors gracefully
-- [ ] Add integration tests with mock API
-- [ ] **Milestone**: Can query LLM and get suggestions
-
-### Phase 3: User Interaction (Week 2)
-- [ ] Add UI prompts for "Run LLM?" question
-- [ ] Display LLM suggestions in terminal
-- [ ] Add "Execute?" confirmation prompt
-- [ ] Handle user input (y/n responses)
-- [ ] Add loading indicators
-- [ ] **Milestone**: Full user flow works end-to-end
-
-### Phase 4: Polish & Safety (Week 3)
+### Phase 4: Safety & Polish (Week 3)
 - [ ] Add dangerous command detection
-- [ ] Implement warning UI
-- [ ] Add configuration options
-- [ ] Optimize error detection patterns
-- [ ] Add local caching for common corrections
-- [ ] Comprehensive testing
+- [ ] Implement elevated confirmation prompts
+- [ ] Add command preview with syntax highlighting
+- [ ] Performance optimization
 - [ ] **Milestone**: Production-ready feature
 
 ### Phase 5: Advanced Features (Future)
-- [ ] Exit code monitoring (requires shell integration)
-- [ ] Support for multiple LLM providers
-- [ ] Command history context (optional)
-- [ ] Analytics on correction accuracy
-- [ ] User feedback mechanism
+- [ ] Command history context
+- [ ] Multi-step command planning
+- [ ] Learning from user corrections
+- [ ] Streaming LLM responses
+- [ ] Local model support (Ollama)
 
 ---
 
-## 11. References & Research
+## 9. Example Workflows
 
-### Similar Implementations
-
-#### Shellsage
-- **URL**: https://github.com/dheerajcl/Shellsage
-- **Approach**: Intercepts terminal errors, uses local/cloud LLMs
-- **Architecture**: Python-based, supports Ollama, OpenAI, Anthropic
-- **Key Insight**: Hybrid local/cloud model for flexibility
-
-#### Warp Terminal
-- **URL**: https://docs.warp.dev/terminal/entry/command-corrections
-- **Approach**: Built on "thefuck" open-source project
-- **Detection**: Misspelled commands, missing flags, permissions
-- **UI**: Inline panel above prompt, accept with click or arrow key
-- **Key Insight**: Non-intrusive, enabled by default
-
-#### The Fuck
-- **URL**: https://github.com/nvbn/thefuck
-- **Approach**: Rule-based command correction
-- **Method**: User types `fuck` after error to get correction
-- **Key Insight**: Extensive library of correction rules
-
-### Technical Resources
-
-#### Rust PTY Handling
-- **Exit code detection**: Challenge with PTY - need shell integration
-- **Pattern matching**: Primary reliable method for error detection
-- **Buffer management**: Keep last N lines for context
-
-#### LLM Best Practices
-- **Low temperature (0.1-0.3)**: Deterministic corrections
-- **Short max_tokens (256)**: Fast responses, focused output
-- **Clear prompts**: No explanations, just commands
-- **Validation**: Parse and validate before execution
-
-### Research Insights
-
-1. **Hybrid detection is essential**: Pattern matching for speed, exit codes for accuracy
-2. **User control is critical**: Never auto-execute, always confirm
-3. **Privacy matters**: Minimize data sent to LLM
-4. **Performance**: Network latency is unavoidable, manage expectations
-5. **Safety first**: Detect and warn about dangerous operations
-
----
-
-## 12. Example Workflows
-
-### Scenario 1: Simple Typo
+### Scenario 1: File Search
 
 ```bash
-$ gti status
-zsh: command not found: gti
+$ find all python files modified this week
 
-╭─────────────────────────────────────────────╮
-│  ⚠ Command failed                          │
-│  Run through LLM for suggestions? (y/n)    │
-╰─────────────────────────────────────────────╯
-> y
+🤖 Generating command with Claude...
 
-╭─────────────────────────────────────────────╮
-│  🤖 Analyzing command with Claude...       │
-╰─────────────────────────────────────────────╯
+💡 Suggested command:
+  find . -name "*.py" -type f -mtime -7
 
-╭─────────────────────────────────────────────╮
-│  💡 Suggested correction:                  │
-│                                            │
-│  $ git status                              │
-│                                            │
-│  Execute this command? (y/n)               │
-╰─────────────────────────────────────────────╯
-> y
+Execute? [y/n]: y
 
-On branch main
-Your branch is up to date with 'origin/main'.
+./src/main.py
+./tests/test_utils.py
+./scripts/deploy.py
 ```
 
-### Scenario 2: Permission Error
+### Scenario 2: Git Operations
 
 ```bash
-$ ./deploy.sh
-bash: ./deploy.sh: Permission denied
+$ create a new branch called feature-auth and switch to it
 
-╭─────────────────────────────────────────────╮
-│  ⚠ Command failed                          │
-│  Run through LLM for suggestions? (y/n)    │
-╰─────────────────────────────────────────────╯
-> y
+🤖 Generating command with Claude...
 
-╭─────────────────────────────────────────────╮
-│  🤖 Analyzing command with Claude...       │
-╰─────────────────────────────────────────────╯
+💡 Suggested commands:
+  1. git checkout -b feature-auth
 
-╭─────────────────────────────────────────────╮
-│  💡 Suggested corrections:                 │
-│                                            │
-│  1. chmod +x ./deploy.sh                   │
-│  2. ./deploy.sh                            │
-│                                            │
-│  Execute all commands? (y/n)               │
-╰─────────────────────────────────────────────╯
-> y
+Execute? [y/n]: y
 
-Executing: chmod +x ./deploy.sh
-Executing: ./deploy.sh
-Deployment started...
+Switched to a new branch 'feature-auth'
 ```
 
-### Scenario 3: User Declines
+### Scenario 3: System Monitoring
 
 ```bash
-$ pythn script.py
-command not found: pythn
+$ show me processes using more than 1GB of memory
 
-╭─────────────────────────────────────────────╮
-│  ⚠ Command failed                          │
-│  Run through LLM for suggestions? (y/n)    │
-╰─────────────────────────────────────────────╯
-> n
+🤖 Generating command with Claude...
 
-$ python script.py
-Script executed successfully
+💡 Suggested command:
+  ps aux | awk '$6 > 1000000 {print $0}'
+
+Execute? [y/n]: y
+
+USER    PID  %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND
+sam     1234  5.2  8.1  2048000 1100000 ??  S    Mon  12:00  25:00.00 node
+```
+
+### Scenario 4: Dangerous Command Warning
+
+```bash
+$ delete all node_modules folders recursively
+
+🤖 Generating command with Claude...
+
+💡 Suggested command:
+  find . -name "node_modules" -type d -exec rm -rf {} +
+
+⚠️  WARNING: This command will permanently delete directories
+Type 'yes' to confirm: yes
+
+Executing...
+[Deletes node_modules folders]
 ```
 
 ---
 
-## 13. Success Metrics
+## 10. Success Metrics
 
 ### Technical Metrics
-- Error detection accuracy: >95% for common patterns
+- Natural language detection accuracy: >90%
 - False positive rate: <5%
 - LLM response time: <3 seconds (p95)
-- Suggestion acceptance rate: >60% (indicates quality)
+- Command acceptance rate: >70% (users say yes)
 
 ### User Experience Metrics
-- Time to correct command: <10 seconds total
-- User satisfaction: Measured via feedback
-- Feature adoption: % of users who enable it
-- Repeat usage: % of detected errors sent to LLM
+- Time saved vs manual command lookup: >60%
+- User satisfaction score: >4/5
+- Feature usage frequency: >10 commands/day per active user
 
 ### Safety Metrics
-- Zero unintended command executions
-- 100% user confirmation before execution
-- Dangerous command warnings: 100% coverage
+- Zero unintended dangerous command executions
+- 100% confirmation before execution
+- Dangerous command warnings: 100% accuracy
 
 ---
 
-## 14. Future Enhancements
+## 11. Future Enhancements
 
 ### Short Term
-1. **Local model support**: Add Ollama integration for offline mode
-2. **Command history context**: Send recent commands for better suggestions
-3. **Shell-specific optimizations**: Detect shell type (bash/zsh/fish) and tailor suggestions
-4. **Keyboard shortcuts**: Quick key to trigger LLM (e.g., Ctrl+L)
+1. **Streaming responses**: Show command as LLM generates it
+2. **Command explanation**: Optional explanation mode
+3. **Multi-step workflows**: Chain multiple related commands
+4. **Command history learning**: Learn from accepted/rejected suggestions
 
 ### Medium Term
-1. **Learning from corrections**: Cache successful corrections locally
-2. **Multiple suggestion alternatives**: Show top 3 options
-3. **Explanation mode**: Optional detailed explanation of error
-4. **Integration with man pages**: Include relevant documentation
+1. **Local model support**: Add Ollama integration for offline use
+2. **Shell-specific optimization**: Detect shell (bash/zsh/fish) and optimize
+3. **Context awareness**: Include recent commands, git status, etc.
+4. **Interactive refinement**: "Modify the last suggestion to..."
 
 ### Long Term
-1. **Agentic workflows**: Multi-step corrections with intermediate confirmations
-2. **Natural language interface**: "list all files" → `ls -la`
-3. **Context-aware suggestions**: Consider current directory, git status, etc.
-4. **Collaborative learning**: Anonymous correction database (opt-in)
+1. **Agentic workflows**: Multi-step planning with intermediate execution
+2. **Natural language output parsing**: Translate command output to NL
+3. **Command templates**: Save common NL→command mappings
+4. **Collaborative learning**: Anonymous suggestion database (opt-in)
+
+---
+
+## 12. Alternative Approaches
+
+### Approach 1: Explicit Trigger Prefix
+
+Instead of auto-detection, require explicit prefix:
+
+```bash
+$ nl: show me all files
+# or
+$ ? show me all files
+```
+
+**Pros**: No ambiguity, clear intent, no false positives
+**Cons**: Extra typing, breaks natural flow
+
+### Approach 2: Modal System
+
+Add a "natural language mode" that users enter explicitly:
+
+```bash
+$ nl-mode
+Entering natural language mode. Type 'exit' to return.
+nl> show me all files
+Suggested: ls -la
+Execute? [y/n]: y
+nl> exit
+$
+```
+
+**Pros**: Very clear separation, no detection needed
+**Cons**: Clunky UX, extra mode to manage
+
+### Approach 3: Post-Command Analysis
+
+Let users run regular commands, but offer to explain/improve them:
+
+```bash
+$ ls -la
+[output]
+$ explain
+🤖 The command 'ls -la' lists all files (-a) in long format (-l)
+$ suggest better
+💡 Alternative: exa -la (modern ls replacement with colors)
+```
+
+**Pros**: Learn as you go, non-intrusive
+**Cons**: Different use case, doesn't help with command generation
 
 ---
 
 ## Appendix A: Configuration Options
 
 ```toml
-[llm]
-# Enable/disable LLM command correction
+[nl_commands]
+# Enable/disable natural language commands
 enabled = true
 
 # LLM provider (openrouter, anthropic, openai)
@@ -1234,80 +1067,57 @@ provider = "openrouter"
 # Model to use
 model = "anthropic/claude-3-5-sonnet"
 
+# API key (or use OPENROUTER_API_KEY env var)
+# api_key = "sk-..."
+
+# Detection mode: "auto" or "explicit" (prefix required)
+detection_mode = "auto"
+
+# Explicit trigger prefix (if detection_mode = "explicit")
+trigger_prefix = "nl:"
+
 # Maximum time to wait for LLM response (seconds)
 timeout = 10
 
-# Minimum confidence level to trigger LLM prompt (high, medium, low)
-min_confidence = "medium"
-
-# Auto-prompt for LLM or require manual trigger
-auto_prompt = true
+# Always require confirmation before execution
+require_confirmation = true
 
 # Show dangerous command warnings
 warn_dangerous = true
 
-# Cache corrections locally
-enable_cache = true
-cache_size = 100
+# Include context in prompts
+include_context = true
 
-[llm.privacy]
-# Send only command and error (no environment)
-minimal_context = true
-
-# Anonymize paths in error output
-anonymize_paths = false
+# Context to include
+[nl_commands.context]
+current_directory = true
+shell_type = true
+os_info = true
+recent_commands = false  # Future: include last N commands
+git_status = false       # Future: include git repo info
 ```
 
 ## Appendix B: Testing Strategy
 
 ### Unit Tests
-- Error pattern matching
-- Command parsing
+- Natural language detection accuracy
 - LLM response parsing
-- Dangerous command detection
+- Command safety detection
+- Context gathering
 
 ### Integration Tests
-- Full workflow with mock LLM
-- Error detection in real shell
-- Command execution flow
+- Full flow with mock LLM
+- PTY stdin/stdout interaction
+- Error handling
 
 ### End-to-End Tests
 - Live LLM integration (with test API key)
-- Real shell commands and errors
+- Real shell command execution
 - User interaction simulation
-
-### Performance Tests
-- Error detection latency
-- Memory usage under load
-- Network failure handling
 
 ---
 
 **End of Proposal**
 
 **Status**: Ready for review and implementation
-**Next Step**: Review with team, gather feedback, proceed with Phase 1 implementation
-
----
-
-## Quick Start Guide
-
-To implement this feature:
-
-1. **Setup**:
-   ```bash
-   export OPENROUTER_API_KEY="your_key_here"
-   ```
-
-2. **Add dependencies** to `saternal-core/Cargo.toml`
-
-3. **Implement modules** in order:
-   - `command_error.rs` (error detection)
-   - `llm_client.rs` (LLM integration)
-   - Modify `terminal.rs` (integration)
-
-4. **Test** with common error scenarios
-
-5. **Iterate** based on real-world usage
-
-The feature is designed to be non-invasive and can be built incrementally!
+**Next Step**: Phase 1 - Core infrastructure implementation
