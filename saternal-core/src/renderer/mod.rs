@@ -1,6 +1,8 @@
 mod borders;
 mod color;
 pub mod cursor;
+mod glyph_atlas;
+mod glyph_renderer;
 mod gpu;
 mod opacity;
 mod pipeline;
@@ -21,6 +23,8 @@ use wgpu;
 
 use borders::BorderRenderer;
 use cursor::{create_cursor_pipeline, CursorConfig, CursorState, CursorStyle};
+use glyph_atlas::GlyphAtlas;
+use glyph_renderer::GlyphRenderer;
 use gpu::GpuContext;
 use opacity::OpacityUniforms;
 use pipeline::{create_render_pipeline, create_vertex_buffer};
@@ -48,7 +52,9 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     font_manager: FontManager,
     texture_manager: TextureManager,
-    text_rasterizer: TextRasterizer,
+    glyph_atlas: GlyphAtlas,
+    glyph_renderer: GlyphRenderer,
+    text_rasterizer: TextRasterizer, // Keep for backward compatibility during transition
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     scroll_offset: f32,  // Fractional scroll position for smooth scrolling
@@ -93,7 +99,25 @@ impl Renderer {
             (cell_width, cell_height, baseline_offset)
         };
 
-        // Create text rasterizer
+        // Create glyph atlas (2048x2048 texture)
+        let glyph_atlas = GlyphAtlas::new(&gpu.device, &gpu.queue, &font_manager, 2048)?;
+        
+        // Create GPU glyph renderer
+        let mut glyph_renderer = GlyphRenderer::new(
+            &gpu.device,
+            gpu.config.format,
+            &glyph_atlas,
+            cell_width,
+            cell_height,
+            baseline_offset,
+            gpu.config.width,
+            gpu.config.height,
+        );
+        
+        // Upload initial screen dimensions
+        glyph_renderer.update_screen_size(&gpu.queue, gpu.config.width, gpu.config.height);
+
+        // Create text rasterizer (kept for backward compatibility)
         let text_rasterizer = TextRasterizer::new(cell_width, cell_height, baseline_offset);
 
         // Create texture manager
@@ -162,6 +186,8 @@ impl Renderer {
             config: gpu.config,
             font_manager,
             texture_manager,
+            glyph_atlas,
+            glyph_renderer,
             text_rasterizer,
             render_pipeline,
             vertex_buffer,
@@ -196,17 +222,17 @@ impl Renderer {
         // Update cursor blink state
         let blink_changed = self.cursor_state.update_blink();
 
-        // Render terminal text to texture
+        // Generate GPU instances for terminal text
         if let Some(term_arc) = &term {
             log::debug!("Attempting to lock terminal for rendering");
             if let Some(term_lock) = term_arc.try_lock() {
-                log::debug!("Terminal locked, rendering to texture");
+                log::debug!("Terminal locked, generating text instances");
                 
                 // Clamp scroll offset to available history
                 let history_size = term_lock.grid().history_size();
                 self.scroll_offset = self.scroll_offset.min(history_size as f32);
                 
-                self.render_terminal_to_texture(&term_lock)?;
+                self.generate_text_instances(&term_lock)?;
                 
                 // Update cursor position
                 self.update_cursor_position(&term_lock);
@@ -490,14 +516,18 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            log::trace!("Setting pipeline and drawing quad...");
+            // Draw background/wallpaper first
+            log::trace!("Drawing background/wallpaper");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.texture_manager.bind_group, &[]);
             render_pass.set_bind_group(1, self.wallpaper_manager.bind_group(), &[]);
             render_pass.set_bind_group(2, self.opacity_uniforms.bind_group(), &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            log::trace!("Drawing 6 vertices for fullscreen quad");
             render_pass.draw(0..6, 0..1);
+            
+            // Draw GPU-rasterized text using instanced rendering
+            log::trace!("Drawing text glyphs with GPU instancing");
+            self.glyph_renderer.render(&mut render_pass, &self.glyph_atlas);
             
             // Draw selection highlights
             if self.selection_renderer.has_selection() {
@@ -616,42 +646,19 @@ impl Renderer {
         render_pass.draw(0..6, 0..instance_count);
     }
 
-    /// Render terminal content to texture (CPU-based for simplicity)
-    fn render_terminal_to_texture<T>(&mut self, term: &Term<T>) -> Result<()> {
-        // Use text rasterizer to generate buffer
-        let buffer = self.text_rasterizer.render_to_buffer(
+    /// Generate GPU instances for terminal content
+    fn generate_text_instances<T>(&mut self, term: &Term<T>) -> Result<()> {
+        self.glyph_renderer.generate_instances(
+            &self.queue,
             term,
+            &mut self.glyph_atlas,
             &self.font_manager,
+            &self.device,
+            self.scroll_offset.round() as usize,
+            &self.color_palette,
             self.config.width,
             self.config.height,
-            self.scroll_offset.round() as usize,  // Convert to usize for grid access
-            self.config.format,
-            &self.color_palette,
-        )?;
-
-        // Upload to GPU texture
-        log::debug!("Uploading {}x{} texture to GPU", self.config.width, self.config.height);
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.texture_manager.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &buffer,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(self.config.width * 4),
-                rows_per_image: Some(self.config.height),
-            },
-            wgpu::Extent3d {
-                width: self.config.width,
-                height: self.config.height,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        Ok(())
+        )
     }
 
     /// Resize the renderer
@@ -666,6 +673,9 @@ impl Renderer {
 
             // Resize texture manager
             self.texture_manager.resize(&self.device, width, height, self.config.format);
+            
+            // Update glyph renderer screen size
+            self.glyph_renderer.update_screen_size(&self.queue, width, height);
 
             info!("Renderer resized successfully");
         }
@@ -714,7 +724,10 @@ impl Renderer {
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let baseline_offset = line_metrics.ascent.ceil();
         
-        // Update text rasterizer
+        // Update glyph renderer
+        self.glyph_renderer.update_dimensions(cell_width, cell_height, baseline_offset);
+        
+        // Update text rasterizer (kept for backward compatibility)
         self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
         
         info!("Font size updated to {} (effective: {}): cell={}x{}, baseline={}", 
@@ -737,7 +750,10 @@ impl Renderer {
         let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
         let baseline_offset = line_metrics.ascent.ceil();
         
-        // Update text rasterizer
+        // Update glyph renderer
+        self.glyph_renderer.update_dimensions(cell_width, cell_height, baseline_offset);
+        
+        // Update text rasterizer (kept for backward compatibility)
         self.text_rasterizer.update_dimensions(cell_width, cell_height, baseline_offset);
         
         info!("DPI updated: effective font size={}, cell={}x{}",
