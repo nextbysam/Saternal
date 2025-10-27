@@ -35,9 +35,13 @@ pub(super) fn handle_keyboard_input(
     let shift = modifiers_state.state().shift_key();
     let ctrl = modifiers_state.state().control_key();
 
-    // Handle Escape key
+    // Handle Escape key for UI operations (search/selection)
+    // Only intercept if search is active or selection exists
     if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Escape)) {
-        return handle_escape(search_state, selection_manager, renderer, tab_manager);
+        if search_state.is_active() || selection_manager.range().is_some() {
+            return handle_escape(search_state, selection_manager, renderer, tab_manager);
+        }
+        // Otherwise, let it fall through to terminal input below
     }
 
     // Pane navigation removed from Ctrl+Tab (conflicts with system shortcuts)
