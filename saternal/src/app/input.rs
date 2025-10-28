@@ -461,13 +461,13 @@ fn handle_confirmation_mode_input(
         
         if is_confirmation {
             // It's a y/n response - handle it
-            if let Some(commands) = super::nl_handler::handle_confirmation_input(tab_manager) {
+            let (commands_opt, cleared) = super::nl_handler::handle_confirmation_input(tab_manager);
+            if let Some(commands) = commands_opt {
                 // User confirmed - execute commands
                 super::nl_handler::execute_nl_commands(commands, tab_manager);
-            } else {
-                // User cancelled or exited confirmation mode
-                // Already handled by handle_confirmation_input
             }
+            // If cleared is true, the confirmation text was removed
+            // If false, it means user entered something else and we exited confirmation mode
         } else {
             // Not a y/n response - pass the entire line to shell
             // First exit confirmation mode
