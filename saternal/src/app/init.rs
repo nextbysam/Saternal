@@ -16,7 +16,7 @@ use winit::{
 
 impl App {
     /// Create a new application
-    pub async fn new(config: saternal_core::Config) -> Result<Self> {
+    pub async fn new(config: saternal_core::Config, tokio_handle: tokio::runtime::Handle) -> Result<Self> {
         info!("Initializing application");
 
         let event_loop = EventLoop::new()?;
@@ -212,6 +212,7 @@ impl App {
             nl_detector,
             nl_tx,
             nl_rx,
+            tokio_handle,
         })
     }
 }

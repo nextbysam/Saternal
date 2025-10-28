@@ -29,6 +29,7 @@ impl App {
         let nl_detector = self.nl_detector.clone();
         let nl_tx = self.nl_tx.clone();
         let mut nl_rx = self.nl_rx;
+        let tokio_handle = self.tokio_handle.clone();
 
         info!("Starting event loop");
 
@@ -88,6 +89,7 @@ impl App {
                         &nl_detector,
                         &llm_client,
                         &nl_tx,
+                        &tokio_handle,
                     );
                     window.request_redraw();
                 }

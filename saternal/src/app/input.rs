@@ -31,6 +31,7 @@ pub(super) fn handle_keyboard_input(
     nl_detector: &NLDetector,
     llm_client: &Option<Arc<LLMClient>>,
     nl_tx: &mpsc::Sender<super::nl_handler::NLMessage>,
+    tokio_handle: &tokio::runtime::Handle,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -77,7 +78,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown, nl_detector, llm_client, nl_tx)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown, nl_detector, llm_client, nl_tx, tokio_handle)
 }
 
 fn handle_escape(
@@ -331,6 +332,7 @@ fn handle_terminal_input(
     nl_detector: &NLDetector,
     llm_client: &Option<Arc<LLMClient>>,
     nl_tx: &mpsc::Sender<super::nl_handler::NLMessage>,
+    tokio_handle: &tokio::runtime::Handle,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -398,7 +400,7 @@ fn handle_terminal_input(
                             let tx_clone = nl_tx.clone();
                             let line_clone = line.clone();
                             
-                            tokio::spawn(async move {
+                            tokio_handle.spawn(async move {
                                 super::nl_handler::handle_nl_command_async(
                                     line_clone,
                                     client_clone,

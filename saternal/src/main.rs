@@ -23,8 +23,16 @@ fn main() -> Result<()> {
     let config = saternal_core::Config::load(None)?;
     info!("Loaded configuration: {:?}", config);
 
+    // Create tokio runtime for async operations
+    // We keep the runtime alive for the entire application lifetime
+    let runtime = tokio::runtime::Runtime::new()?;
+    let handle = runtime.handle().clone();
+    
+    // Enter the runtime context so tokio operations work throughout the app
+    let _guard = runtime.enter();
+
     // Create and run the application using pollster to block on async initialization
-    let app = pollster::block_on(app::App::new(config))?;
+    let app = pollster::block_on(app::App::new(config, handle))?;
     app.run()?;
 
     Ok(())
