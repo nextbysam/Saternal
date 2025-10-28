@@ -339,50 +339,68 @@ impl Renderer {
             log::debug!("Rendering UI overlay");
             let box_cells = ui_box.render(&self.color_palette);
             
-            // Calculate grid dimensions
+            // Calculate cell dimensions
             let effective_size = self.font_manager.effective_font_size();
             let line_metrics = self.font_manager.font().horizontal_line_metrics(effective_size).unwrap();
             let cell_width = self.font_manager.font().metrics('M', effective_size).advance_width;
             let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
             
-            let grid_cols = ((self.config.width as f32 - crate::constants::PADDING_LEFT - crate::constants::PADDING_RIGHT) / cell_width) as usize;
-            let grid_rows = ((self.config.height as f32 - crate::constants::PADDING_TOP - crate::constants::PADDING_BOTTOM) / cell_height) as usize;
-            
-            // Get cursor position from focused pane to position UI overlay
-            let mut cursor_row = grid_rows.saturating_sub(3); // Default to near bottom
-            let cursor_col: usize = 0; // Start at left edge
-            
+            // Get cursor position from focused pane and position UI in that viewport
             if let Some(focused_vp) = viewports.iter().find(|vp| vp.focused) {
                 if let Some(pane) = pane_tree.find_pane(focused_vp.pane_id) {
                     if let Some(term_lock) = pane.terminal.term().try_lock() {
                         let cursor_pos = term_lock.grid().cursor.point;
-                        // Position UI box 1 line below cursor, accounting for viewport offset
-                        let cursor_in_viewport = (cursor_pos.line.0 as usize).saturating_add(1);
-                        cursor_row = cursor_in_viewport;
+                        
+                        // Get scroll offset for this pane (only focused pane scrolls)
+                        let history_size = term_lock.grid().history_size();
+                        let pane_scroll_offset = if focused_vp.focused {
+                            scroll_offset.min(history_size as f32).round() as usize
+                        } else {
+                            0
+                        };
+                        
+                        // Calculate cursor position in viewport, accounting for scroll
+                        // When scrolled up, cursor moves down visually
+                        let cursor_line_in_viewport = (cursor_pos.line.0 as i32 + pane_scroll_offset as i32) as usize;
+                        
+                        // Position UI box 1 line below cursor, with 2 column indent
+                        let ui_row = cursor_line_in_viewport.saturating_add(1);
+                        let ui_col = 2; // 2 columns indent
+                        
+                        // Calculate viewport dimensions in cells
+                        let vp_cols = ((focused_vp.width as f32 - crate::constants::PADDING_LEFT - crate::constants::PADDING_RIGHT) / cell_width) as usize;
+                        let vp_rows = ((focused_vp.height as f32 - crate::constants::PADDING_TOP - crate::constants::PADDING_BOTTOM) / cell_height) as usize;
+                        
+                        // Clamp to viewport bounds (prevent overflow at bottom)
+                        let box_height = ui_box.height();
+                        let ui_row = ui_row.min(vp_rows.saturating_sub(box_height + 1));
+                        
+                        // Convert grid position to pixel position within viewport
+                        let pixel_x_in_vp = ui_col as f32 * cell_width + crate::constants::PADDING_LEFT;
+                        let pixel_y_in_vp = ui_row as f32 * cell_height + crate::constants::PADDING_TOP;
+                        
+                        // Add viewport offset to get window-relative pixel position
+                        let pixel_x = focused_vp.x as f32 + pixel_x_in_vp;
+                        let pixel_y = focused_vp.y as f32 + pixel_y_in_vp;
+                        
+                        log::debug!("UI overlay: cursor=({}, {}), scroll={}, viewport=({}, {}), pixel=({:.1}, {:.1})",
+                                   cursor_pos.column.0, cursor_pos.line.0, pane_scroll_offset,
+                                   focused_vp.x, focused_vp.y, pixel_x, pixel_y);
+                        
+                        self.text_rasterizer.overlay_cells(
+                            &mut combined_buffer,
+                            &box_cells,
+                            pixel_x as u32,
+                            pixel_y as u32,
+                            self.config.width,
+                            self.config.height,
+                            &self.font_manager,
+                            self.config.format,
+                            &self.color_palette,
+                        );
                     }
                 }
             }
-            
-            // Position box at cursor line + 1, with 2 column indent for alignment
-            let box_width = ui_box.width();
-            let box_height = ui_box.height();
-            let start_col = cursor_col.saturating_add(2); // 2 columns indent
-            let start_row = cursor_row;
-            
-            // Make sure box doesn't overflow bottom
-            let start_row = start_row.min(grid_rows.saturating_sub(box_height + 1));
-            
-            self.text_rasterizer.overlay_cells(
-                &mut combined_buffer,
-                &box_cells,
-                start_row,
-                start_col,
-                self.config.width,
-                self.config.height,
-                &self.font_manager,
-                self.config.format,
-                &self.color_palette,
-            );
         }
         
         // Update cursor for focused pane (requires re-locking)

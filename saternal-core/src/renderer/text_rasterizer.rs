@@ -200,13 +200,13 @@ impl TextRasterizer {
     }
 
     /// Overlay UI box cells onto an existing buffer
-    /// Renders cells at specified grid position
+    /// Renders cells at specified pixel position (accounts for viewport offset)
     pub fn overlay_cells(
         &self,
         buffer: &mut [u8],
         cells: &[Vec<Cell>],
-        start_row: usize,
-        start_col: usize,
+        pixel_x: u32,
+        pixel_y: u32,
         width: u32,
         height: u32,
         font_manager: &FontManager,
@@ -222,13 +222,10 @@ impl TextRasterizer {
         let box_bg = [0.0, 0.0, 0.0, 0.8]; // Black with 80% opacity
 
         for (row_offset, row_cells) in cells.iter().enumerate() {
-            let row = start_row + row_offset;
-            
             for (col_offset, cell) in row_cells.iter().enumerate() {
-                let col = start_col + col_offset;
-                
-                let x = (col as f32 * self.cell_width + PADDING_LEFT) as u32;
-                let y = (row as f32 * self.cell_height + PADDING_TOP) as u32;
+                // Calculate position relative to provided pixel offset
+                let x = pixel_x + (col_offset as f32 * self.cell_width) as u32;
+                let y = pixel_y + (row_offset as f32 * self.cell_height) as u32;
                 
                 // Draw cell background (semi-transparent box background)
                 for dy in 0..(self.cell_height as u32) {

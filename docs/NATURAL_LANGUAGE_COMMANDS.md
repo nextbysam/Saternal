@@ -199,6 +199,17 @@ If natural language is detected:
 
 This overlay is rendered directly onto the GPU framebuffer, **not** sent to the shell. The UI box appears directly below your cursor line with a 2-column indent, making it feel like an integrated part of your terminal session rather than a disconnected popup.
 
+**Pane-Aware Positioning (Split-Screen Support):**
+- In split-screen mode, the UI overlay appears in the **focused pane** where you typed the command
+- The overlay is positioned relative to the viewport boundaries, not globally
+- Each pane has its own cursor tracking and UI positioning
+
+**Scroll-Aware Behavior:**
+- The UI overlay respects scroll position and moves with terminal content
+- When you scroll up in history, the UI overlay moves accordingly
+- If scrolled far enough, the UI will go out of view just like normal text
+- The overlay maintains its position relative to the cursor line, not the viewport
+
 ### 3. Visual Confirmation Mode
 
 Once the API responds:
@@ -503,13 +514,17 @@ pub enum UIMessage {
 }
 
 // Rendering pipeline
-1. Terminal content rendered to buffer
+1. Terminal content rendered to buffer for each pane (parallel)
 2. Get cursor position from focused pane
-3. UI overlay cells generated from UIMessage
-4. Cells positioned 1 line below cursor with 2-column indent
-5. Cells rendered on top of buffer with alpha blending
-6. Combined buffer uploaded to GPU
-7. GPU renders final frame
+3. Calculate viewport-relative pixel position:
+   - Account for scroll offset (cursor moves with content)
+   - Convert grid coordinates to pixels within viewport
+   - Add viewport offset (x, y) for split-pane positioning
+4. UI overlay cells generated from UIMessage
+5. Cells positioned at calculated pixel coordinates
+6. Cells rendered on top of combined buffer with alpha blending
+7. Combined buffer uploaded to GPU
+8. GPU renders final frame with pane borders
 ```
 
 **Files Created:**
@@ -518,10 +533,14 @@ pub enum UIMessage {
 **Files Modified:**
 - `saternal/src/tab.rs` - Added ui_message field
 - `saternal/src/app/nl_handler.rs` - Set UI state instead of logging
-- `saternal-core/src/renderer/text_rasterizer.rs` - Added overlay_cells()
-- `saternal-core/src/renderer/mod.rs` - Added render_with_panes_and_ui(), cursor-relative UI positioning
+- `saternal-core/src/renderer/text_rasterizer.rs` - Modified overlay_cells() to accept pixel coordinates
+- `saternal-core/src/renderer/mod.rs` - Added pane-aware and scroll-aware UI positioning
 - `saternal/src/app/window.rs` - Convert UIMessage to UIBox
 - `saternal/src/app/input.rs` - Added strip_shell_prompt(), modified NL detection
+
+**Recent Fixes (2025-10-28):**
+- **Split-screen UI positioning**: UI overlay now appears in the correct pane when using split-screen, not globally positioned
+- **Scroll awareness**: UI overlay respects scroll offset and moves with terminal content (scrolls out of view when scrolling up)
 
 ## Future Enhancements
 
