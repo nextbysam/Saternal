@@ -48,9 +48,10 @@ The terminal will automatically detect the API key and enable natural language c
 ### File Operations
 ```bash
 $ show me all rust files in this project
-🤖 Generating command with Claude...
-💡 Generated 1 command.
-y    # Type 'y' and press Enter to execute
+# (Check logs - command generated silently)
+# (Terminal returns to normal prompt)
+$ y
+# (The 'y' is cleared and command executes)
 find . -name "*.rs" -type f
 ./src/main.rs
 ./saternal-core/src/lib.rs
@@ -60,9 +61,10 @@ find . -name "*.rs" -type f
 ### Git Workflows
 ```bash
 $ commit all changes with message "Add feature"
-🤖 Generating command with Claude...
-💡 Generated 2 commands.
-y    # Type 'y' and press Enter to execute
+# (Check logs - 2 commands generated silently)
+# (Terminal returns to normal prompt)
+$ y
+# (The 'y' is cleared and commands execute in order)
 git add .
 git commit -m "Add feature"
 [main abc1234] Add feature
@@ -143,26 +145,32 @@ Detection criteria:
 ### 2. Async API Call
 
 If natural language is detected:
-1. Display "🤖 Generating command with Claude..."
+1. Log "🤖 Generating command with Claude..." (not displayed in terminal)
 2. Spawn non-blocking tokio task
 3. Call Anannas AI API with Claude model
 4. Cache result for future use
 5. Return to event loop (UI never blocks)
 
-### 3. Command Presentation & Confirmation Mode
+**Note**: No UI messages are written to terminal to prevent shell from trying to execute them as commands. All status messages are logged for debugging.
+
+### 3. Silent Confirmation Mode
 
 Once the API responds:
 1. Parse commands from LLM response
 2. Check for dangerous patterns
-3. Display suggestions with appropriate warnings
+3. **Log commands and warnings** (not displayed in terminal)
 4. **Store commands in memory buffer** (`pending_nl_commands`)
 5. **Enter confirmation mode** (`nl_confirmation_mode = true`)
-6. Wait for user confirmation
+6. **Terminal stays at normal shell prompt** - user can type normally
+7. Wait for user to type `y`, `yes`, `n`, or `no`
 
 **In confirmation mode:**
-- All text input is intercepted and stored in `confirmation_input` buffer
-- Input is NOT passed to the shell or read from terminal grid
-- This prevents the prompt text from interfering with yes/no detection
+- User's input is captured in `confirmation_input` buffer
+- Input is still passed to shell so user sees what they type
+- When Enter is pressed, we check the buffer for y/n confirmation
+- If confirmed: clear the confirmation text with backspaces, execute commands
+- If cancelled: clear the confirmation text with backspaces
+- If other input: exit confirmation mode, let shell execute it normally
 
 ### 4. Execution
 
@@ -185,7 +193,11 @@ After execution or cancellation:
 - Memory buffers cleared
 - Terminal returns to normal input mode
 
-**Note**: For simplicity, command details are logged but not displayed in the terminal to prevent accidental execution. Check the logs to see what commands will be run before confirming.
+**Important Notes**:
+- Command details are **logged only** (not displayed in terminal) to prevent shell from executing them
+- To see what commands will be run, check the application logs before typing 'y'
+- Look for log messages like: "💡 Generated 1 command" and "Command 1: <command>"
+- This silent mode prevents UI text from being interpreted as shell commands
 
 ## Architecture
 
@@ -363,10 +375,20 @@ detection_mode = "auto"  # or "explicit" (requires "nl:" prefix)
 **Problem**: After generating commands, when user typed "y" or "n", the entire terminal line (including prompt text like "Execute? [y/n]: y") was being read from the grid and treated as new natural language, triggering another LLM request.  
 **Solution**: 
 - Added `confirmation_input` buffer to `Tab` struct to track user input separately
-- When in confirmation mode, intercept ALL text input and store in buffer (not passed to PTY)
+- When in confirmation mode, intercept text input and store in buffer
 - Read from buffer instead of terminal grid for yes/no detection
 - This prevents prompt text contamination and ensures only user's actual typed response is checked
 - Memory is properly freed after confirmation (execute or cancel)
+
+### 5. UI Messages Causing Shell Execution
+**Problem**: UI messages like "🤖 Generating command with Claude..." and "💡 Generated 1 command." were being written to PTY stdin using `write_input()`. The shell interpreted these as commands and tried to execute them, resulting in "command not found: 🤖" errors.  
+**Solution**:
+- Removed ALL UI message writes to PTY stdin
+- Changed `display_nl_processing_message()` and `display_suggestions()` to only log messages
+- Terminal stays at normal shell prompt during command generation
+- Silent confirmation mode: user types y/n at normal prompt
+- When confirmed, use backspaces to clear the confirmation text before executing
+- This prevents any UI text from being interpreted as shell commands
 
 ## Future Enhancements
 
