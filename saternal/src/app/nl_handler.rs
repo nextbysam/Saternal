@@ -87,8 +87,6 @@ pub fn display_nl_processing_message(tab_manager: &Arc<Mutex<crate::tab::TabMana
 
 /// Display command suggestions with warnings if needed
 fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, commands: &[String]) {
-    let mut message = String::from("\r\n");
-    
     // Check if any commands are dangerous
     let highest_level = commands
         .iter()
@@ -100,6 +98,9 @@ fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, command
         })
         .unwrap_or(ConfirmationLevel::Standard);
 
+    // Build message WITHOUT actual command text (to prevent shell execution)
+    let mut message = String::from("\r\n");
+    
     // Display warning if needed
     if highest_level != ConfirmationLevel::Standard {
         if let Some(warning) = commands
@@ -110,18 +111,17 @@ fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, command
         }
     }
 
-    message.push_str("💡 Suggested command(s):\r\n");
-
-    // Display commands with numbering
-    for (i, cmd) in commands.iter().enumerate() {
-        if commands.len() > 1 {
-            message.push_str(&format!("  {}. {}\r\n", i + 1, cmd));
-        } else {
-            message.push_str(&format!("  {}\r\n", cmd));
-        }
+    // Display count of commands generated (not the commands themselves!)
+    if commands.len() == 1 {
+        message.push_str("💡 Generated 1 command.\r\n");
+    } else {
+        message.push_str(&format!("💡 Generated {} commands.\r\n", commands.len()));
     }
 
-    message.push_str("\r\n");
+    // Log the actual commands (for debugging)
+    for (i, cmd) in commands.iter().enumerate() {
+        log::info!("  Command {}: {}", i + 1, cmd);
+    }
 
     // Prompt based on confirmation level
     match highest_level {
@@ -224,13 +224,17 @@ pub fn execute_nl_commands(
 ) {
     let mut tab_mgr = tab_manager.lock();
     if let Some(tab) = tab_mgr.active_tab_mut() {
-        for cmd in &commands {
-            // Write each command to PTY with newline
+        // Add newline after the "y" confirmation to clear the line
+        let _ = tab.write_input(b"\r\n");
+        
+        // Execute each command (shell will echo them)
+        for (i, cmd) in commands.iter().enumerate() {
+            log::info!("✓ Executing command {}: {}", i + 1, cmd);
+            
+            // Write command to PTY stdin with newline to execute
             let cmd_with_newline = format!("{}\n", cmd);
             if let Err(e) = tab.write_input(cmd_with_newline.as_bytes()) {
                 log::error!("Failed to execute command '{}': {}", cmd, e);
-            } else {
-                log::info!("✓ Executing: {}", cmd);
             }
         }
     }

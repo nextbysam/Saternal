@@ -350,6 +350,15 @@ detection_mode = "auto"  # or "explicit" (requires "nl:" prefix)
 **Problem**: LLM API calls are async, but keyboard events come from synchronous winit event loop.  
 **Solution**: Use `tokio::sync::mpsc` channels to bridge async tasks and sync event loop, with `try_recv()` in `AboutToWait` event.
 
+### 4. Confirmation Input Isolation
+**Problem**: After generating commands, when user typed "y" or "n", the entire terminal line (including prompt text like "Execute? [y/n]: y") was being read from the grid and treated as new natural language, triggering another LLM request.  
+**Solution**: 
+- Added `confirmation_input` buffer to `Tab` struct to track user input separately
+- When in confirmation mode, intercept ALL text input and store in buffer (not passed to PTY)
+- Read from buffer instead of terminal grid for yes/no detection
+- This prevents prompt text contamination and ensures only user's actual typed response is checked
+- Memory is properly freed after confirmation (execute or cancel)
+
 ## Future Enhancements
 
 - [ ] Streaming responses (progressive command display)
