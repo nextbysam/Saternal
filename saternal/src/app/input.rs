@@ -336,6 +336,17 @@ fn handle_terminal_input(
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
+    // Check if we're in NL confirmation mode - if so, handle specially
+    let in_confirmation_mode = {
+        let tab_mgr = tab_manager.lock();
+        tab_mgr.active_tab().map(|t| t.nl_confirmation_mode).unwrap_or(false)
+    };
+
+    if in_confirmation_mode {
+        // In confirmation mode: intercept input and add to buffer
+        return handle_confirmation_mode_input(event, tab_manager, renderer, window);
+    }
+
     // Check for jump to bottom shortcut
     if let PhysicalKey::Code(keycode) = event.physical_key {
         if is_jump_to_bottom(&event.logical_key, keycode, input_mods) {
@@ -351,23 +362,9 @@ fn handle_terminal_input(
         if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
             // Check for Enter key - intercept to detect commands and NL
             if bytes == b"\r" || bytes == b"\n" {
-                // First check if we're in NL confirmation mode
-                if let Some(commands) = super::nl_handler::handle_confirmation_input("", tab_manager) {
-                    // User confirmed - execute commands
-                    super::nl_handler::execute_nl_commands(commands, tab_manager);
-                    return true;
-                }
-                
                 // Read current line from grid (captures typed + autocompleted + pasted text)
                 if let Some(line) = read_current_line_from_grid(tab_manager) {
                     log::debug!("Enter pressed - checking for command (line length: {})", line.len());
-
-                    // Check if we're in confirmation mode (user typed y/n/yes)
-                    if let Some(commands) = super::nl_handler::handle_confirmation_input(&line, tab_manager) {
-                        // User confirmed - execute commands
-                        super::nl_handler::execute_nl_commands(commands, tab_manager);
-                        return true;
-                    }
 
                     // Check if it's a builtin terminal command
                     if let Some(cmd) = crate::app::commands::parse_command(&line) {
@@ -435,6 +432,56 @@ fn handle_terminal_input(
             renderer.lock().reset_scroll();
             window.request_redraw();
         }
+    }
+
+    false
+}
+
+/// Handle input when in NL confirmation mode
+/// Intercepts text and stores in confirmation buffer instead of passing to PTY
+fn handle_confirmation_mode_input(
+    event: &KeyEvent,
+    tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
+    renderer: &Arc<Mutex<Renderer>>,
+    window: &winit::window::Window,
+) -> bool {
+    // Handle Enter key - check confirmation
+    if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Enter)) {
+        if let Some(commands) = super::nl_handler::handle_confirmation_input(tab_manager) {
+            // User confirmed - execute commands
+            super::nl_handler::execute_nl_commands(commands, tab_manager);
+        }
+        // If cancelled or invalid, handle_confirmation_input already displayed message
+        window.request_redraw();
+        return true;
+    }
+
+    // Handle Backspace - remove last character from buffer
+    if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Backspace)) {
+        if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+            if !active_tab.confirmation_input.is_empty() {
+                active_tab.confirmation_input.pop();
+                // Echo backspace to terminal for visual feedback
+                let _ = active_tab.write_input(b"\x08 \x08");
+            }
+        }
+        window.request_redraw();
+        return true;
+    }
+
+    // Handle regular text input - add to confirmation buffer
+    if let Some(text) = &event.text {
+        // Filter out control characters
+        let printable: String = text.chars().filter(|c| !c.is_control()).collect();
+        if !printable.is_empty() {
+            if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                active_tab.confirmation_input.push_str(&printable);
+                // Echo to terminal for visual feedback
+                let _ = active_tab.write_input(printable.as_bytes());
+            }
+            window.request_redraw();
+        }
+        return true;
     }
 
     false

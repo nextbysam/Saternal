@@ -151,19 +151,32 @@ If natural language is detected:
 4. Cache result for future use
 5. Return to event loop (UI never blocks)
 
-### 3. Command Presentation
+### 3. Command Presentation & Confirmation Mode
 
 Once the API responds:
 1. Parse commands from LLM response
 2. Check for dangerous patterns
 3. Display suggestions with appropriate warnings
-4. Wait for user confirmation
+4. **Store commands in memory buffer** (`pending_nl_commands`)
+5. **Enter confirmation mode** (`nl_confirmation_mode = true`)
+6. Wait for user confirmation
+
+**In confirmation mode:**
+- All text input is intercepted and stored in `confirmation_input` buffer
+- Input is NOT passed to the shell or read from terminal grid
+- This prevents the prompt text from interfering with yes/no detection
 
 ### 4. Execution
 
-User types `y`, `yes`, or `n`:
-- **Yes**: Commands are written to PTY stdin and executed by shell
-- **No**: Commands are discarded, prompt returns
+User types `y`, `yes`, `n`, or `no` and presses Enter:
+- **Yes**: Commands pulled from memory buffer and executed via PTY
+- **No**: Commands and buffer are cleared, memory freed
+- **Invalid input**: Buffer cleared, user prompted again
+
+After execution or cancellation:
+- Confirmation mode disabled
+- Memory buffers cleared
+- Terminal returns to normal input mode
 
 ## Architecture
 
@@ -194,11 +207,33 @@ User types `y`, `yes`, or `n`:
 - PTY command execution
 
 **Modified Files:**
-- `input.rs`: Enter key interception, NL detection
-- `event_loop.rs`: Channel receiver, message handling
-- `state.rs`: LLM client and NL state
-- `init.rs`: LLM client initialization
+- `main.rs`: Tokio runtime creation, dotenvy integration
+- `state.rs`: LLM client, NL state, and Tokio runtime handle
+- `init.rs`: LLM client initialization, accepts runtime handle
+- `event_loop.rs`: Channel receiver, message handling, passes runtime handle
+- `input.rs`: Enter key interception, NL detection, async task spawning
 - `tab.rs`: Pending commands tracking
+
+### Runtime Architecture
+
+The app uses a hybrid async/sync architecture:
+
+**Tokio Runtime Setup:**
+```rust
+// main.rs
+let runtime = tokio::runtime::Runtime::new()?;
+let _guard = runtime.enter();  // Sets runtime context for entire thread
+let handle = runtime.handle().clone();
+let app = App::new(config, handle)?;
+app.run()?;  // Starts synchronous winit event loop
+```
+
+**Key Design Points:**
+- Persistent Tokio runtime lives for entire app lifetime
+- `runtime.enter()` sets context so `handle.spawn()` works from sync code
+- Runtime handle stored in `App` struct and passed through event handlers
+- Winit event loop (synchronous) can spawn async LLM tasks via the handle
+- Tokio channel (`mpsc`) bridges async tasks and sync event loop
 
 ## Performance
 
@@ -225,7 +260,26 @@ detection_mode = "auto"  # or "explicit" (requires "nl:" prefix)
 
 ### "ANANNAS_API_KEY not set - natural language commands disabled"
 
-**Solution**: Create `.env` file with your API key (see Quick Start above).
+**Root Cause**: The `.env` file is not being loaded at startup.
+
+**Solution**: 
+1. Ensure you have a `.env` file in the project root with your API key:
+   ```bash
+   ANANNAS_API_KEY=your_actual_api_key_here
+   ```
+2. The app uses `dotenvy` to load `.env` files automatically at startup
+3. Check logs at startup - you should see: `✓ LLM client initialized with Anannas AI`
+
+### "there is no reactor running, must be called from the context of a Tokio 1.x runtime"
+
+**Root Cause**: The Tokio runtime wasn't properly set up for the synchronous winit event loop.
+
+**Fixed in**: The app now creates a persistent Tokio runtime in `main.rs` that lives for the entire application lifetime. The runtime handle is passed through the app and used for spawning async tasks from synchronous contexts.
+
+**Technical Details**: 
+- `pollster::block_on()` creates a temporary runtime that dies after initialization
+- `winit::EventLoop` is synchronous and can't spawn Tokio tasks directly
+- Solution: Create runtime with `Runtime::new()`, use `runtime.enter()` to set context, pass `Handle` to spawn tasks
 
 ### Natural language not detected
 
@@ -281,6 +335,20 @@ detection_mode = "auto"  # or "explicit" (requires "nl:" prefix)
 - API calls cost money (see Anannas AI pricing)
 - Complex multi-step workflows may need refinement
 - Context limited to shell, directory, and OS (no command history yet)
+
+## Technical Challenges Solved
+
+### 1. Environment Variable Loading
+**Problem**: `.env` files weren't being loaded, so `ANANNAS_API_KEY` was never available.  
+**Solution**: Added `dotenvy` dependency and call `dotenvy::dotenv()` at the start of `main()`.
+
+### 2. Tokio Runtime in Synchronous Context
+**Problem**: `tokio::spawn()` panicked with "no reactor running" because winit's event loop is synchronous.  
+**Solution**: Created a persistent Tokio runtime with `Runtime::new()`, used `runtime.enter()` to set context, and passed `Handle` throughout the app to spawn tasks from sync code.
+
+### 3. Async/Sync Bridge
+**Problem**: LLM API calls are async, but keyboard events come from synchronous winit event loop.  
+**Solution**: Use `tokio::sync::mpsc` channels to bridge async tasks and sync event loop, with `try_recv()` in `AboutToWait` event.
 
 ## Future Enhancements
 

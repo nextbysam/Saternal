@@ -154,9 +154,9 @@ fn write_to_terminal(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, message: 
 }
 
 /// Handle user confirmation response
-/// Returns true if commands should be executed
+/// Reads from tab.confirmation_input buffer
+/// Returns Some(commands) if user confirmed, None if cancelled or invalid
 pub fn handle_confirmation_input(
-    input: &str,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
 ) -> Option<Vec<String>> {
     let mut tab_mgr = tab_manager.lock();
@@ -180,7 +180,8 @@ pub fn handle_confirmation_input(
         })
         .unwrap_or(ConfirmationLevel::Standard);
 
-    let input_lower = input.trim().to_lowercase();
+    // Read from confirmation buffer (user's actual input, not from grid)
+    let input_lower = tab.confirmation_input.trim().to_lowercase();
     
     let should_execute = match highest_level {
         ConfirmationLevel::Standard => {
@@ -195,15 +196,18 @@ pub fn handle_confirmation_input(
         // User confirmed - return commands for execution
         let commands = tab.pending_nl_commands.take().unwrap();
         tab.nl_confirmation_mode = false;
+        tab.confirmation_input.clear();
         Some(commands)
     } else if input_lower == "n" || input_lower == "no" {
         // User cancelled
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
+        tab.confirmation_input.clear();
         let _ = tab.write_input(b"\r\nCancelled.\r\n");
         None
     } else {
-        // Invalid input - ask again
+        // Invalid input - ask again, clear buffer for next attempt
+        tab.confirmation_input.clear();
         let message = match highest_level {
             ConfirmationLevel::Standard => "Please type 'y' or 'n': ",
             _ => "Please type 'yes' or 'n': ",

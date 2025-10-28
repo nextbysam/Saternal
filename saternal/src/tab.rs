@@ -12,6 +12,8 @@ pub struct Tab {
     pub pending_nl_commands: Option<Vec<String>>,
     /// Whether the tab is in NL confirmation mode
     pub nl_confirmation_mode: bool,
+    /// Buffer for user input during confirmation (not from grid)
+    pub confirmation_input: String,
 }
 
 impl Tab {
@@ -30,6 +32,7 @@ impl Tab {
             next_pane_id: 1,
             pending_nl_commands: None,
             nl_confirmation_mode: false,
+            confirmation_input: String::new(),
         })
     }
 
