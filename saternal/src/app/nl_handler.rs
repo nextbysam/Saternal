@@ -79,14 +79,14 @@ pub fn handle_nl_message(
     }
 }
 
-/// Display "Generating..." message in terminal
-pub fn display_nl_processing_message(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
-    let message = "\r\n🤖 Generating command with Claude...\r\n";
-    write_to_terminal(tab_manager, message);
+/// Log "Generating..." message (don't write to terminal to avoid shell execution)
+pub fn display_nl_processing_message(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
+    log::info!("🤖 Generating command with Claude...");
+    // Don't write to PTY stdin - it would cause shell to try executing the emoji as a command
 }
 
-/// Display command suggestions with warnings if needed
-fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, commands: &[String]) {
+/// Log command suggestions (don't write to terminal to avoid shell execution)
+fn display_suggestions(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>, commands: &[String]) {
     // Check if any commands are dangerous
     let highest_level = commands
         .iter()
@@ -98,40 +98,39 @@ fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, command
         })
         .unwrap_or(ConfirmationLevel::Standard);
 
-    // Build message WITHOUT actual command text (to prevent shell execution)
-    let mut message = String::from("\r\n");
-    
-    // Display warning if needed
+    // Log warning if needed
     if highest_level != ConfirmationLevel::Standard {
         if let Some(warning) = commands
             .iter()
             .find_map(|cmd| get_warning_message(cmd))
         {
-            message.push_str(&format!("{}\r\n\r\n", warning));
+            log::warn!("{}", warning);
         }
     }
 
-    // Display count of commands generated (not the commands themselves!)
+    // Log count of commands generated
     if commands.len() == 1 {
-        message.push_str("💡 Generated 1 command.\r\n");
+        log::info!("💡 Generated 1 command");
     } else {
-        message.push_str(&format!("💡 Generated {} commands.\r\n", commands.len()));
+        log::info!("💡 Generated {} commands", commands.len());
     }
 
-    // Log the actual commands (for debugging)
+    // Log the actual commands
     for (i, cmd) in commands.iter().enumerate() {
         log::info!("  Command {}: {}", i + 1, cmd);
     }
 
-    // Log the prompt (don't write to terminal to avoid shell execution)
+    // Log the confirmation prompt
     let prompt = match highest_level {
-        ConfirmationLevel::Standard => "[Waiting for y/n confirmation]",
-        ConfirmationLevel::Sudo => "[Waiting for 'yes' confirmation (sudo command)]",
-        ConfirmationLevel::Elevated => "[Waiting for 'yes' confirmation (dangerous command)]",
+        ConfirmationLevel::Standard => "⏳ Waiting for y/n confirmation at shell prompt",
+        ConfirmationLevel::Sudo => "⏳ Waiting for 'yes' confirmation (sudo command)",
+        ConfirmationLevel::Elevated => "⚠️  Waiting for 'yes' confirmation (DANGEROUS command)",
     };
     log::info!("{}", prompt);
+    log::info!("💡 Tip: Type 'y' or 'yes' and press Enter to execute, 'n' to cancel");
     
-    write_to_terminal(tab_manager, &message);
+    // Don't write to PTY stdin - terminal stays at normal shell prompt
+    // User types y/n there, and we intercept it in confirmation mode
 }
 
 /// Display error message in terminal
