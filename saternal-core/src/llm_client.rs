@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const ANANNAS_BASE_URL: &str = "https://api.anannas.ai/v1/chat/completions";
-const DEFAULT_MODEL: &str = "anthropic/claude-3.5-sonnet";
+const DEFAULT_MODEL: &str = "anthropic/claude-3-5-sonnet-20240620";
 const DEFAULT_TIMEOUT: u64 = 10;
 const CACHE_SIZE: usize = 100;
 
