@@ -3,6 +3,7 @@ use crate::font::FontManager;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::Term;
+use alacritty_terminal::term::cell::Cell;
 use anyhow::Result;
 use wgpu;
 
@@ -198,5 +199,116 @@ impl TextRasterizer {
         }
     }
 
+    /// Overlay UI box cells onto an existing buffer
+    /// Renders cells at specified grid position
+    pub fn overlay_cells(
+        &self,
+        buffer: &mut [u8],
+        cells: &[Vec<Cell>],
+        start_row: usize,
+        start_col: usize,
+        width: u32,
+        height: u32,
+        font_manager: &FontManager,
+        surface_format: wgpu::TextureFormat,
+        palette: &ColorPalette,
+    ) {
+        let is_bgra = matches!(
+            surface_format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
 
+        // Semi-transparent background for UI box
+        let box_bg = [0.0, 0.0, 0.0, 0.8]; // Black with 80% opacity
+
+        for (row_offset, row_cells) in cells.iter().enumerate() {
+            let row = start_row + row_offset;
+            
+            for (col_offset, cell) in row_cells.iter().enumerate() {
+                let col = start_col + col_offset;
+                
+                let x = (col as f32 * self.cell_width + PADDING_LEFT) as u32;
+                let y = (row as f32 * self.cell_height + PADDING_TOP) as u32;
+                
+                // Draw cell background (semi-transparent box background)
+                for dy in 0..(self.cell_height as u32) {
+                    for dx in 0..(self.cell_width as u32) {
+                        let px = x + dx;
+                        let py = y + dy;
+                        
+                        if px < width && py < height {
+                            let buffer_idx = ((py * width + px) * 4) as usize;
+                            if buffer_idx + 3 < buffer.len() {
+                                // Alpha blend with existing pixel
+                                let alpha = box_bg[3];
+                                let bg_r = (box_bg[0] * 255.0) as u8;
+                                let bg_g = (box_bg[1] * 255.0) as u8;
+                                let bg_b = (box_bg[2] * 255.0) as u8;
+                                
+                                let existing_r = buffer[buffer_idx] as f32 / 255.0;
+                                let existing_g = buffer[buffer_idx + 1] as f32 / 255.0;
+                                let existing_b = buffer[buffer_idx + 2] as f32 / 255.0;
+                                
+                                let blended_r = (bg_r as f32 / 255.0 * alpha + existing_r * (1.0 - alpha)) * 255.0;
+                                let blended_g = (bg_g as f32 / 255.0 * alpha + existing_g * (1.0 - alpha)) * 255.0;
+                                let blended_b = (bg_b as f32 / 255.0 * alpha + existing_b * (1.0 - alpha)) * 255.0;
+                                
+                                if is_bgra {
+                                    buffer[buffer_idx] = blended_b as u8;
+                                    buffer[buffer_idx + 1] = blended_g as u8;
+                                    buffer[buffer_idx + 2] = blended_r as u8;
+                                } else {
+                                    buffer[buffer_idx] = blended_r as u8;
+                                    buffer[buffer_idx + 1] = blended_g as u8;
+                                    buffer[buffer_idx + 2] = blended_b as u8;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Draw character if not space
+                let c = cell.c;
+                if c != ' ' && c != '\0' {
+                    let glyph_bitmap = font_manager.rasterize_glyph(c);
+                    let fg_rgb = ansi_to_rgb_with_palette(&cell.fg, palette);
+                    let fg_r = (fg_rgb[0] * 255.0) as u8;
+                    let fg_g = (fg_rgb[1] * 255.0) as u8;
+                    let fg_b = (fg_rgb[2] * 255.0) as u8;
+                    
+                    // Draw glyph
+                    for (glyph_y, glyph_row) in glyph_bitmap.iter().enumerate() {
+                        for (glyph_x, &coverage) in glyph_row.iter().enumerate() {
+                            if coverage > 0 {
+                                let px = x + glyph_x as u32;
+                                let py = y + self.baseline_offset as u32 + glyph_y as u32;
+                                
+                                if px < width && py < height {
+                                    let buffer_idx = ((py * width + px) * 4) as usize;
+                                    if buffer_idx + 3 < buffer.len() {
+                                        let alpha = coverage as f32 / 255.0;
+                                        let fg_r_pre = (fg_r as f32 * alpha) as u8;
+                                        let fg_g_pre = (fg_g as f32 * alpha) as u8;
+                                        let fg_b_pre = (fg_b as f32 * alpha) as u8;
+                                        
+                                        if is_bgra {
+                                            buffer[buffer_idx] = fg_b_pre;
+                                            buffer[buffer_idx + 1] = fg_g_pre;
+                                            buffer[buffer_idx + 2] = fg_r_pre;
+                                            buffer[buffer_idx + 3] = coverage;
+                                        } else {
+                                            buffer[buffer_idx] = fg_r_pre;
+                                            buffer[buffer_idx + 1] = fg_g_pre;
+                                            buffer[buffer_idx + 2] = fg_b_pre;
+                                            buffer[buffer_idx + 3] = coverage;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

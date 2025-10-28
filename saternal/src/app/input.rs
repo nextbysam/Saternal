@@ -391,6 +391,7 @@ fn handle_terminal_input(
                             
                             // Display "Generating..." message
                             super::nl_handler::display_nl_processing_message(tab_manager);
+                            window.request_redraw();  // Show "Generating..." UI immediately
                             
                             // Spawn async task to call LLM
                             let client_clone = client.clone();

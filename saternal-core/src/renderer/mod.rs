@@ -9,6 +9,7 @@ mod pipeline;
 mod text_rasterizer;
 mod texture;
 pub mod theme;
+mod ui_box;
 mod wallpaper;
 
 use crate::font::FontManager;
@@ -31,9 +32,11 @@ use pipeline::{create_render_pipeline, create_vertex_buffer};
 use text_rasterizer::TextRasterizer;
 use texture::TextureManager;
 pub use theme::ColorPalette;
+pub use ui_box::UIBox;
 use wallpaper::WallpaperManager;
 use crate::selection::{SelectionRange, SelectionRenderer, PaneViewport, calculate_pane_viewports};
 use crate::pane::PaneNode;
+use crate::ConfirmationLevel;
 
 // Deleted: ScrollAnimation spring physics (Step 2 - Delete unnecessary complexity)
 // Replaced with simple fractional scrolling for smooth, jitter-free scrolling
@@ -255,6 +258,11 @@ impl Renderer {
     /// Render a frame with pane tree (shows all panes in their viewports)
     /// Uses parallel rendering for improved performance with multiple panes
     pub fn render_with_panes(&mut self, pane_tree: &PaneNode) -> Result<()> {
+        self.render_with_panes_and_ui(pane_tree, None)
+    }
+
+    /// Render with optional UI overlay
+    pub fn render_with_panes_and_ui(&mut self, pane_tree: &PaneNode, ui_box: Option<&UIBox>) -> Result<()> {
         // Calculate pane viewports
         let viewports = calculate_pane_viewports(pane_tree, self.config.width, self.config.height);
         
@@ -323,6 +331,39 @@ impl Renderer {
                 viewport.width,
                 viewport.height,
                 self.config.width,
+            );
+        }
+        
+        // Render UI overlay if present
+        if let Some(ui_box) = ui_box {
+            log::debug!("Rendering UI overlay");
+            let box_cells = ui_box.render(&self.color_palette);
+            
+            // Calculate center-bottom position for UI box
+            let effective_size = self.font_manager.effective_font_size();
+            let line_metrics = self.font_manager.font().horizontal_line_metrics(effective_size).unwrap();
+            let cell_width = self.font_manager.font().metrics('M', effective_size).advance_width;
+            let cell_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil();
+            
+            let grid_cols = ((self.config.width as f32 - crate::constants::PADDING_LEFT - crate::constants::PADDING_RIGHT) / cell_width) as usize;
+            let grid_rows = ((self.config.height as f32 - crate::constants::PADDING_TOP - crate::constants::PADDING_BOTTOM) / cell_height) as usize;
+            
+            // Center horizontally, position near bottom
+            let box_width = ui_box.width();
+            let box_height = ui_box.height();
+            let start_col = (grid_cols.saturating_sub(box_width)) / 2;
+            let start_row = grid_rows.saturating_sub(box_height + 2); // 2 rows from bottom
+            
+            self.text_rasterizer.overlay_cells(
+                &mut combined_buffer,
+                &box_cells,
+                start_row,
+                start_col,
+                self.config.width,
+                self.config.height,
+                &self.font_manager,
+                self.config.format,
+                &self.color_palette,
             );
         }
         
