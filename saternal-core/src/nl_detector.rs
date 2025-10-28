@@ -104,7 +104,7 @@ impl NLDetector {
 
     /// Strip explicit trigger prefix from input
     #[inline]
-    pub fn strip_trigger(&self, line: &str) -> &str {
+    pub fn strip_trigger<'a>(&self, line: &'a str) -> &'a str {
         let line = line.trim();
         if line.starts_with("nl:") {
             line[3..].trim()

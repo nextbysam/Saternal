@@ -1,65 +1,34 @@
-# Rust
+.env
+
+# Environment files
+.env.*
+!.env.example
+
+# Rust / Cargo
 /target/
-**/*.rs.bk
-Cargo.lock
+**/target/
 
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# macOS
+# macOS system files
 .DS_Store
 .AppleDouble
 .LSOverride
-Icon?
 ._*
-.DocumentRevisions-V100
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
+
+# Editors / IDEs
+.vscode/
+.idea/
+.fleet/
+*.code-workspace
 
 # Logs
-*.log
 logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Config files (if you want to ignore local config)
-# .config/
-
-# Build artifacts
-*.o
-*.so
-*.dylib
-*.dll
-*.exe
-
-# Debug files
-*.pdb
-
-# Coverage reports
-tarpaulin-report.html
-lcov.info
-
-# Backup files
-*.bak
-*.backup
-*.tmp
-
-# OS generated files
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-.env
-
+# Swap/backup files
+*.swp
+*.swo
+*~
+target/

@@ -3,17 +3,19 @@ use alacritty_terminal::index::Column;
 use log::info;
 use parking_lot::Mutex;
 use saternal_core::{
-    Config, InputModifiers, Renderer, SearchState, SelectionManager, SplitDirection,
+    Config, InputModifiers, LLMClient, NLDetector, Renderer, SearchState, SelectionManager, SplitDirection,
     is_jump_to_bottom, key_to_bytes,
 };
 use saternal_macos::DropdownWindow;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use winit::{
     event::{ElementState, KeyEvent, Modifiers},
     keyboard::{Key, KeyCode, PhysicalKey},
 };
 
 /// Handle keyboard input events
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_keyboard_input(
     event: &KeyEvent,
     state: ElementState,
@@ -26,6 +28,9 @@ pub(super) fn handle_keyboard_input(
     font_size: &mut f32,
     window: &winit::window::Window,
     dropdown: &Arc<Mutex<DropdownWindow>>,
+    nl_detector: &NLDetector,
+    llm_client: &Option<Arc<LLMClient>>,
+    nl_tx: &mpsc::Sender<super::nl_handler::NLMessage>,
 ) -> bool {
     if state != ElementState::Pressed {
         return false;
@@ -72,7 +77,7 @@ pub(super) fn handle_keyboard_input(
     }
 
     // Handle terminal input
-    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown)
+    handle_terminal_input(event, modifiers_state, tab_manager, renderer, window, dropdown, nl_detector, llm_client, nl_tx)
 }
 
 fn handle_escape(
@@ -323,6 +328,9 @@ fn handle_terminal_input(
     renderer: &Arc<Mutex<Renderer>>,
     window: &winit::window::Window,
     dropdown: &Arc<Mutex<DropdownWindow>>,
+    nl_detector: &NLDetector,
+    llm_client: &Option<Arc<LLMClient>>,
+    nl_tx: &mpsc::Sender<super::nl_handler::NLMessage>,
 ) -> bool {
     let input_mods = InputModifiers::from_winit(modifiers_state.state());
 
@@ -339,13 +347,27 @@ fn handle_terminal_input(
     // Try to convert key to terminal bytes
     if let PhysicalKey::Code(keycode) = event.physical_key {
         if let Some(bytes) = key_to_bytes(&event.logical_key, keycode, input_mods) {
-            // Check for Enter key - intercept to detect commands
+            // Check for Enter key - intercept to detect commands and NL
             if bytes == b"\r" || bytes == b"\n" {
+                // First check if we're in NL confirmation mode
+                if let Some(commands) = super::nl_handler::handle_confirmation_input("", tab_manager) {
+                    // User confirmed - execute commands
+                    super::nl_handler::execute_nl_commands(commands, tab_manager);
+                    return true;
+                }
+                
                 // Read current line from grid (captures typed + autocompleted + pasted text)
                 if let Some(line) = read_current_line_from_grid(tab_manager) {
                     log::debug!("Enter pressed - checking for command (line length: {})", line.len());
 
-                    // Check if it's a terminal command
+                    // Check if we're in confirmation mode (user typed y/n/yes)
+                    if let Some(commands) = super::nl_handler::handle_confirmation_input(&line, tab_manager) {
+                        // User confirmed - execute commands
+                        super::nl_handler::execute_nl_commands(commands, tab_manager);
+                        return true;
+                    }
+
+                    // Check if it's a builtin terminal command
                     if let Some(cmd) = crate::app::commands::parse_command(&line) {
                         let cmd_name = get_command_name(&cmd);
                         log::info!("✓ Command detected: {}", cmd_name);
@@ -359,6 +381,31 @@ fn handle_terminal_input(
                             return true;
                         } else {
                             log::warn!("⚠️ Command execution failed");
+                            return true;
+                        }
+                    }
+
+                    // Check if it's natural language (and LLM client is available)
+                    if let Some(client) = llm_client {
+                        if nl_detector.is_natural_language(&line) {
+                            log::info!("🤖 Natural language detected: '{}'", line);
+                            
+                            // Display "Generating..." message
+                            super::nl_handler::display_nl_processing_message(tab_manager);
+                            
+                            // Spawn async task to call LLM
+                            let client_clone = client.clone();
+                            let tx_clone = nl_tx.clone();
+                            let line_clone = line.clone();
+                            
+                            tokio::spawn(async move {
+                                super::nl_handler::handle_nl_command_async(
+                                    line_clone,
+                                    client_clone,
+                                    tx_clone,
+                                ).await;
+                            });
+                            
                             return true;
                         }
                     }

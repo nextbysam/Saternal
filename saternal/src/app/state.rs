@@ -1,10 +1,11 @@
 use parking_lot::Mutex;
 use saternal_core::{
-    Clipboard, Config, Renderer, SearchState, SelectionManager, MouseState,
+    Clipboard, Config, LLMClient, NLDetector, Renderer, SearchState, SelectionManager, MouseState,
     PADDING_LEFT, PADDING_TOP, PADDING_RIGHT, PADDING_BOTTOM, MIN_CELL_DIMENSION,
 };
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
 
 /// Main application state
@@ -21,6 +22,11 @@ pub struct App {
     pub(super) clipboard: Clipboard,
     pub(super) search_state: SearchState,
     pub(super) mouse_state: MouseState,
+    // Natural language command generation
+    pub(super) llm_client: Option<Arc<LLMClient>>,
+    pub(super) nl_detector: NLDetector,
+    pub(super) nl_tx: mpsc::Sender<super::nl_handler::NLMessage>,
+    pub(super) nl_rx: mpsc::Receiver<super::nl_handler::NLMessage>,
 }
 
 impl App {

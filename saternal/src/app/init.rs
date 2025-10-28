@@ -4,9 +4,10 @@ use cocoa::base::id;
 use log::info;
 use objc::{msg_send, sel, sel_impl};
 use parking_lot::Mutex;
-use saternal_core::{Clipboard, Renderer, SearchState, SelectionManager, MouseState};
+use saternal_core::{Clipboard, LLMClient, NLDetector, Renderer, SearchState, SelectionManager, MouseState};
 use saternal_macos::{DropdownWindow, HotkeyManager};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use winit::{
     event_loop::EventLoop,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
@@ -170,6 +171,30 @@ impl App {
         let search_state = SearchState::new();
         let mouse_state = MouseState::new();
 
+        // Initialize natural language command generation
+        let (nl_tx, nl_rx) = mpsc::channel(32);
+        let nl_detector = NLDetector::new();
+        
+        // Try to load LLM client from environment
+        let llm_client = match std::env::var("ANANNAS_API_KEY") {
+            Ok(api_key) if !api_key.is_empty() => {
+                match LLMClient::new(api_key) {
+                    Ok(client) => {
+                        info!("✓ LLM client initialized with Anannas AI");
+                        Some(Arc::new(client))
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to initialize LLM client: {}", e);
+                        None
+                    }
+                }
+            }
+            _ => {
+                info!("ANANNAS_API_KEY not set - natural language commands disabled");
+                None
+            }
+        };
+
         Ok(Self {
             config,
             event_loop,
@@ -183,6 +208,10 @@ impl App {
             clipboard,
             search_state,
             mouse_state,
+            llm_client,
+            nl_detector,
+            nl_tx,
+            nl_rx,
         })
     }
 }

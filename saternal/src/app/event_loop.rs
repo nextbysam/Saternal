@@ -23,6 +23,12 @@ impl App {
         let mut selection_manager = self.selection_manager;
         let mut search_state = self.search_state;
         let mut mouse_state = self.mouse_state;
+        
+        // Natural language command generation state
+        let llm_client = self.llm_client.clone();
+        let nl_detector = self.nl_detector.clone();
+        let nl_tx = self.nl_tx.clone();
+        let mut nl_rx = self.nl_rx;
 
         info!("Starting event loop");
 
@@ -79,6 +85,9 @@ impl App {
                         &mut font_size,
                         &window,
                         &dropdown,
+                        &nl_detector,
+                        &llm_client,
+                        &nl_tx,
                     );
                     window.request_redraw();
                 }
@@ -123,6 +132,12 @@ impl App {
                 }
 
                 Event::AboutToWait => {
+                    // Check for NL messages from async tasks
+                    if let Ok(msg) = nl_rx.try_recv() {
+                        super::nl_handler::handle_nl_message(msg, &tab_manager);
+                        window.request_redraw();
+                    }
+                    
                     if let Some(mut tab_mgr) = tab_manager.try_lock() {
                         if let Some(active_tab) = tab_mgr.active_tab_mut() {
                             match active_tab.process_output() {
