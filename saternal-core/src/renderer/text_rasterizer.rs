@@ -270,18 +270,25 @@ impl TextRasterizer {
                 // Draw character if not space
                 let c = cell.c;
                 if c != ' ' && c != '\0' {
-                    let glyph_bitmap = font_manager.rasterize_glyph(c);
+                    let (metrics, bitmap) = font_manager.rasterize(c);
                     let fg_rgb = ansi_to_rgb_with_palette(&cell.fg, palette);
-                    let fg_r = (fg_rgb[0] * 255.0) as u8;
-                    let fg_g = (fg_rgb[1] * 255.0) as u8;
-                    let fg_b = (fg_rgb[2] * 255.0) as u8;
+                    let fg_r = fg_rgb.0;
+                    let fg_g = fg_rgb.1;
+                    let fg_b = fg_rgb.2;
                     
-                    // Draw glyph
-                    for (glyph_y, glyph_row) in glyph_bitmap.iter().enumerate() {
-                        for (glyph_x, &coverage) in glyph_row.iter().enumerate() {
+                    // Calculate glyph position with baseline alignment
+                    let glyph_x = x as f32;
+                    let glyph_y = y as f32 + self.baseline_offset - (metrics.height as f32 + metrics.ymin as f32);
+                    
+                    // Draw glyph using flat bitmap with metrics
+                    for gy in 0..metrics.height {
+                        for gx in 0..metrics.width {
+                            let glyph_idx = gy * metrics.width + gx;
+                            let coverage = bitmap[glyph_idx];
+                            
                             if coverage > 0 {
-                                let px = x + glyph_x as u32;
-                                let py = y + self.baseline_offset as u32 + glyph_y as u32;
+                                let px = (glyph_x + gx as f32) as u32;
+                                let py = (glyph_y + gy as f32) as u32;
                                 
                                 if px < width && py < height {
                                     let buffer_idx = ((py * width + px) * 4) as usize;
