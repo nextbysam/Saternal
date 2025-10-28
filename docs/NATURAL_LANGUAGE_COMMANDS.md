@@ -182,11 +182,12 @@ Detection criteria:
 ### 2. Async API Call & UI Feedback
 
 If natural language is detected:
-1. **Display "Generating..." UI overlay** (blue box with loading indicator)
-2. Spawn non-blocking tokio task
-3. Call Anannas AI API with Claude model
-4. Cache result for future use
-5. Return to event loop (UI never blocks)
+1. **Send newline to terminal** (moves cursor to next line)
+2. **Display "Generating..." UI overlay** (blue box with loading indicator)
+3. Spawn non-blocking tokio task
+4. Call Anannas AI API with Claude model
+5. Cache result for future use
+6. Return to event loop (UI never blocks)
 
 **Visual Feedback:**
 ```
@@ -222,8 +223,8 @@ Once the API responds:
 - User's input is captured in `confirmation_input` buffer
 - Input is still passed to shell so user sees what they type
 - When Enter is pressed, we check the buffer for y/n confirmation
-- If confirmed: clear the confirmation text with backspaces, execute commands
-- If cancelled: clear the confirmation text with backspaces, clear UI overlay
+- If confirmed: clear the confirmation text with backspaces, send newline, execute commands
+- If cancelled: clear the confirmation text with backspaces, send newline, clear UI overlay
 - If other input: exit confirmation mode, clear UI overlay, let shell execute it normally
 
 ### 4. Execution
@@ -231,13 +232,15 @@ Once the API responds:
 User types `y`, `yes`, `n`, or `no` and presses Enter:
 - **Yes (`y` or `yes`)**: 
   - Commands pulled from memory buffer
-  - Newline added to clear confirmation line
+  - Confirmation text cleared with backspaces
+  - Newline sent to move to fresh prompt line
   - Each command executed in order via PTY stdin
   - Shell echoes and runs each command
 - **No (`n` or `no`)**: 
   - Commands and buffer are cleared
+  - Confirmation text cleared with backspaces
+  - Newline sent to move to fresh prompt line
   - Memory freed
-  - Newline added to return to prompt
 - **Other input**: 
   - Exit confirmation mode
   - Pass the entered text to shell as normal command
@@ -246,7 +249,23 @@ After execution or cancellation:
 - Confirmation mode disabled
 - Memory buffers cleared
 - **UI overlay removed**
+- Cursor moved to fresh line
 - Terminal returns to normal input mode
+
+**Visual Flow Example:**
+```
+Line 1: $ tell me my git status         ← User types natural language
+Line 2: tell: command not found          ← Shell processes, then AI UI appears
+        ╭─ AI Generated Command ─────╮
+        │ git status                  │
+        ├─────────────────────────────┤
+        │ [y/yes] Execute [n/no] Cancel│
+        ╰─────────────────────────────╯
+        y                               ← User types y
+Line 3: $ git status                    ← Fresh prompt, command executes
+        On branch main
+        Your branch is up to date...
+```
 
 **Important Notes**:
 - Commands are displayed in a **visual UI overlay** rendered on top of terminal content
