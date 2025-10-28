@@ -3,6 +3,7 @@
 **/*.rs.bk
 Cargo.lock
 
+
 # IDE
 .vscode/
 .idea/
@@ -59,3 +60,6 @@ lcov.info
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+.env
+

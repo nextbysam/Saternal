@@ -8,6 +8,10 @@ pub struct Tab {
     pub title: String,
     pub pane_tree: PaneNode,
     next_pane_id: usize,
+    /// Pending natural language commands awaiting user confirmation
+    pub pending_nl_commands: Option<Vec<String>>,
+    /// Whether the tab is in NL confirmation mode
+    pub nl_confirmation_mode: bool,
 }
 
 impl Tab {
@@ -24,6 +28,8 @@ impl Tab {
             title: format!("Tab {}", id + 1),
             pane_tree,
             next_pane_id: 1,
+            pending_nl_commands: None,
+            nl_confirmation_mode: false,
         })
     }
 
