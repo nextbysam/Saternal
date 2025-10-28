@@ -54,3 +54,4 @@ env_logger.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 pollster = "0.3"
+dotenvy.workspace = true
