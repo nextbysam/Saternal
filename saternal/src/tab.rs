@@ -1,6 +1,20 @@
 use anyhow::Result;
 use log::info;
-use saternal_core::{PaneNode, SplitDirection};
+use saternal_core::{PaneNode, SplitDirection, ConfirmationLevel};
+
+/// UI message to display as overlay on terminal
+#[derive(Debug, Clone)]
+pub enum UIMessage {
+    /// Generating command from LLM
+    Generating { query: String },
+    /// Command suggestion ready for confirmation
+    Suggestion {
+        commands: Vec<String>,
+        safety: ConfirmationLevel,
+    },
+    /// Error occurred during generation
+    Error { message: String },
+}
 
 /// Represents a single tab containing a pane tree
 pub struct Tab {
@@ -14,6 +28,8 @@ pub struct Tab {
     pub nl_confirmation_mode: bool,
     /// Buffer for user input during confirmation (not from grid)
     pub confirmation_input: String,
+    /// UI message to display as overlay
+    pub ui_message: Option<UIMessage>,
 }
 
 impl Tab {
@@ -33,6 +49,7 @@ impl Tab {
             pending_nl_commands: None,
             nl_confirmation_mode: false,
             confirmation_input: String::new(),
+            ui_message: None,
         })
     }
 
