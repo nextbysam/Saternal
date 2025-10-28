@@ -322,6 +322,43 @@ fn read_current_line_from_grid(tab_manager: &Arc<Mutex<crate::tab::TabManager>>)
     Some(line.trim_end().to_string())
 }
 
+/// Strip shell prompt from a line to get just the command
+/// Handles common prompt formats:
+/// - `user@host path % command` (zsh)
+/// - `user@host:path$ command` (bash)
+/// - `[user@host path]$ command` (bash variant)
+#[inline]
+fn strip_shell_prompt(line: &str) -> &str {
+    // Look for common prompt terminators followed by space
+    // Try to find the last occurrence to handle nested prompts
+    
+    // Pattern 1: ` % ` (zsh style)
+    if let Some(pos) = line.rfind(" % ") {
+        return line[pos + 3..].trim_start();
+    }
+    
+    // Pattern 2: ` $ ` (bash/sh style)
+    if let Some(pos) = line.rfind(" $ ") {
+        return line[pos + 3..].trim_start();
+    }
+    
+    // Pattern 3: `]$ ` (bracketed bash style)
+    if let Some(pos) = line.rfind("]$ ") {
+        return line[pos + 3..].trim_start();
+    }
+    
+    // Pattern 4: `> ` (PowerShell/generic)
+    if let Some(pos) = line.rfind("> ") {
+        // Only if preceded by non-space (to avoid matching redirects)
+        if pos > 0 && !line[..pos].ends_with(' ') {
+            return line[pos + 2..].trim_start();
+        }
+    }
+    
+    // No prompt found, return original line
+    line
+}
+
 fn handle_terminal_input(
     event: &KeyEvent,
     modifiers_state: &Modifiers,
@@ -386,21 +423,24 @@ fn handle_terminal_input(
 
                     // Check if it's natural language (and LLM client is available)
                     if let Some(client) = llm_client {
-                        if nl_detector.is_natural_language(&line) {
-                            log::info!("🤖 Natural language detected: '{}'", line);
+                        // Strip shell prompt before checking for natural language
+                        let command_only = strip_shell_prompt(&line);
+                        
+                        if nl_detector.is_natural_language(command_only) {
+                            log::info!("🤖 Natural language detected: '{}'", command_only);
                             
                             // Display "Generating..." message
                             super::nl_handler::display_nl_processing_message(tab_manager);
                             window.request_redraw();  // Show "Generating..." UI immediately
                             
-                            // Spawn async task to call LLM
+                            // Spawn async task to call LLM with the stripped command
                             let client_clone = client.clone();
                             let tx_clone = nl_tx.clone();
-                            let line_clone = line.clone();
+                            let command_clone = command_only.to_string();
                             
                             tokio_handle.spawn(async move {
                                 super::nl_handler::handle_nl_command_async(
-                                    line_clone,
+                                    command_clone,
                                     client_clone,
                                     tx_clone,
                                 ).await;
