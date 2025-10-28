@@ -6,6 +6,19 @@ use saternal_core::{CommandContext, ConfirmationLevel, LLMClient, get_confirmati
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Get the highest safety level from a list of commands
+fn get_highest_safety_level(commands: &[String]) -> ConfirmationLevel {
+    commands
+        .iter()
+        .map(|cmd| get_confirmation_level(cmd))
+        .max_by_key(|level| match level {
+            ConfirmationLevel::Standard => 0,
+            ConfirmationLevel::Sudo => 1,
+            ConfirmationLevel::Elevated => 2,
+        })
+        .unwrap_or(ConfirmationLevel::Standard)
+}
+
 /// Message types sent from async task to main thread
 #[derive(Debug, Clone)]
 pub enum NLMessage {
@@ -69,8 +82,15 @@ pub fn handle_nl_message(
             // Set pending commands state
             let mut tab_mgr = tab_manager.lock();
             if let Some(tab) = tab_mgr.active_tab_mut() {
-                tab.pending_nl_commands = Some(commands);
+                tab.pending_nl_commands = Some(commands.clone());
                 tab.nl_confirmation_mode = true;
+                
+                // Set UI message for display
+                let safety = get_highest_safety_level(&commands);
+                tab.ui_message = Some(crate::tab::UIMessage::Suggestion {
+                    commands,
+                    safety,
+                });
             }
         }
         NLMessage::Error { error, .. } => {
@@ -79,10 +99,17 @@ pub fn handle_nl_message(
     }
 }
 
-/// Log "Generating..." message (don't write to terminal to avoid shell execution)
-pub fn display_nl_processing_message(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
+/// Display "Generating..." message as UI overlay
+pub fn display_nl_processing_message(tab_manager: &Arc<Mutex<crate::tab::TabManager>>) {
     log::info!("🤖 Generating command with Claude...");
-    // Don't write to PTY stdin - it would cause shell to try executing the emoji as a command
+    
+    // Set UI message for display
+    let mut tab_mgr = tab_manager.lock();
+    if let Some(tab) = tab_mgr.active_tab_mut() {
+        tab.ui_message = Some(crate::tab::UIMessage::Generating {
+            query: "Generating command with Claude...".to_string(),
+        });
+    }
 }
 
 /// Log command suggestions (don't write to terminal to avoid shell execution)
@@ -133,10 +160,17 @@ fn display_suggestions(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>, comman
     // User types y/n there, and we intercept it in confirmation mode
 }
 
-/// Log error message (don't write to terminal to avoid shell execution)
-fn display_error_message(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>, error: &str) {
+/// Display error message as UI overlay
+fn display_error_message(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, error: &str) {
     log::error!("❌ Failed to generate command: {}", error);
-    // Don't write to PTY stdin - would cause shell to try executing the error message
+    
+    // Set UI message for display
+    let mut tab_mgr = tab_manager.lock();
+    if let Some(tab) = tab_mgr.active_tab_mut() {
+        tab.ui_message = Some(crate::tab::UIMessage::Error {
+            message: error.to_string(),
+        });
+    }
 }
 
 /// Handle user confirmation response
@@ -192,6 +226,7 @@ pub fn handle_confirmation_input(
         let commands = tab.pending_nl_commands.take().unwrap();
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
+        tab.ui_message = None;  // Clear UI overlay
         
         // Clear the "y" or "yes" they typed using backspaces
         for _ in 0..input_len {
@@ -205,6 +240,7 @@ pub fn handle_confirmation_input(
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
+        tab.ui_message = None;  // Clear UI overlay
         
         // Clear the "n" or "no" they typed
         for _ in 0..input_len {
@@ -217,6 +253,7 @@ pub fn handle_confirmation_input(
         log::info!("User entered something else, exiting confirmation mode");
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
+        tab.ui_message = None;  // Clear UI overlay
         // Don't clear input - let it execute as a normal command
         (None, false)
     }
