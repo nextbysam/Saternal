@@ -429,6 +429,11 @@ fn handle_terminal_input(
                         if nl_detector.is_natural_language(command_only) {
                             log::info!("🤖 Natural language detected: '{}'", command_only);
                             
+                            // Send newline to move to next line before showing UI
+                            if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                                let _ = active_tab.write_input(b"\n");
+                            }
+                            
                             // Display "Generating..." message
                             super::nl_handler::display_nl_processing_message(tab_manager);
                             window.request_redraw();  // Show "Generating..." UI immediately

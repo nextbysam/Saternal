@@ -233,6 +233,9 @@ pub fn handle_confirmation_input(
             let _ = tab.write_input(b"\x08 \x08"); // backspace, space, backspace
         }
         
+        // Add newline to move to next line
+        let _ = tab.write_input(b"\n");
+        
         (Some(commands), true)
     } else if input_lower == "n" || input_lower == "no" {
         // User cancelled
@@ -246,6 +249,9 @@ pub fn handle_confirmation_input(
         for _ in 0..input_len {
             let _ = tab.write_input(b"\x08 \x08");
         }
+        
+        // Add newline to move to next line
+        let _ = tab.write_input(b"\n");
         
         (None, true)
     } else {

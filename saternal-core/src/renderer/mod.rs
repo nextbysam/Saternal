@@ -339,7 +339,7 @@ impl Renderer {
             log::debug!("Rendering UI overlay");
             let box_cells = ui_box.render(&self.color_palette);
             
-            // Calculate center-bottom position for UI box
+            // Calculate grid dimensions
             let effective_size = self.font_manager.effective_font_size();
             let line_metrics = self.font_manager.font().horizontal_line_metrics(effective_size).unwrap();
             let cell_width = self.font_manager.font().metrics('M', effective_size).advance_width;
@@ -348,11 +348,29 @@ impl Renderer {
             let grid_cols = ((self.config.width as f32 - crate::constants::PADDING_LEFT - crate::constants::PADDING_RIGHT) / cell_width) as usize;
             let grid_rows = ((self.config.height as f32 - crate::constants::PADDING_TOP - crate::constants::PADDING_BOTTOM) / cell_height) as usize;
             
-            // Center horizontally, position near bottom
+            // Get cursor position from focused pane to position UI overlay
+            let mut cursor_row = grid_rows.saturating_sub(3); // Default to near bottom
+            let cursor_col: usize = 0; // Start at left edge
+            
+            if let Some(focused_vp) = viewports.iter().find(|vp| vp.focused) {
+                if let Some(pane) = pane_tree.find_pane(focused_vp.pane_id) {
+                    if let Some(term_lock) = pane.terminal.term().try_lock() {
+                        let cursor_pos = term_lock.grid().cursor.point;
+                        // Position UI box 1 line below cursor, accounting for viewport offset
+                        let cursor_in_viewport = (cursor_pos.line.0 as usize).saturating_add(1);
+                        cursor_row = cursor_in_viewport;
+                    }
+                }
+            }
+            
+            // Position box at cursor line + 1, with 2 column indent for alignment
             let box_width = ui_box.width();
             let box_height = ui_box.height();
-            let start_col = (grid_cols.saturating_sub(box_width)) / 2;
-            let start_row = grid_rows.saturating_sub(box_height + 2); // 2 rows from bottom
+            let start_col = cursor_col.saturating_add(2); // 2 columns indent
+            let start_row = cursor_row;
+            
+            // Make sure box doesn't overflow bottom
+            let start_row = start_row.min(grid_rows.saturating_sub(box_height + 1));
             
             self.text_rasterizer.overlay_cells(
                 &mut combined_buffer,

@@ -165,6 +165,14 @@ When you press Enter, the terminal uses a fast heuristic detector (<100ns) to ch
 - **Detected as NL**: "show me all files", "find rust code", "list processes"
 - **Not detected**: `ls -la`, `git status`, `cd /tmp`
 
+**Shell Prompt Stripping:**
+Before detection, the system automatically strips common shell prompts to prevent false positives:
+- Zsh style: `user@host path %`
+- Bash style: `user@host:path$` or `[user@host path]$`
+- PowerShell style: `>`
+
+This ensures that commands like `sam@Sams-MacBook-Pro saternal % git add .` are correctly identified as shell commands, not natural language.
+
 Detection criteria:
 - Contains question words (how, what, show, list, find, etc.)
 - Contains articles (the, a, an, my, all)
@@ -188,7 +196,7 @@ If natural language is detected:
 ╰───────────────────────────────────────────────────────────╯
 ```
 
-This overlay is rendered directly onto the GPU framebuffer, **not** sent to the shell.
+This overlay is rendered directly onto the GPU framebuffer, **not** sent to the shell. The UI box appears directly below your cursor line with a 2-column indent, making it feel like an integrated part of your terminal session rather than a disconnected popup.
 
 ### 3. Visual Confirmation Mode
 
@@ -443,10 +451,28 @@ detection_mode = "auto"  # or "explicit" (requires "nl:" prefix)
   - `Suggestion { commands, safety }` - Color-coded by safety level
   - `Error { message }` - Red border for errors
 - UI boxes rendered directly into pixel buffer via `overlay_cells()` method
-- Position: center-bottom with semi-transparent black background (80% opacity)
+- Position: 1 line below cursor with 2-column indent, overflow protection
 - Border colors: Green (safe), Yellow (sudo), Red (dangerous)
 - UI state cleared on confirmation/cancel
 - **Result**: UI never sent to PTY stdin, shell never tries to execute it
+
+### 6. Shell Prompt Contamination in NL Detection
+**Problem**: When user typed commands, the entire terminal line (including shell prompt like `sam@Sams-MacBook-Pro saternal %`) was being read from the grid and checked for natural language. This caused regular commands like `git add .` to be misdetected as natural language because the full string contained user names, hostnames, and met length criteria.
+
+**Root Cause**: `read_current_line_from_grid()` reads all visible characters on the cursor line, including the prompt.
+
+**Solution**: Added prompt stripping before NL detection
+- Created `strip_shell_prompt()` function in `saternal/src/app/input.rs`
+- Detects and removes common prompt patterns:
+  - Zsh: `user@host path % `
+  - Bash: `user@host:path$ ` or `[user@host path]$ `
+  - PowerShell: `> `
+- Uses `rfind()` to handle nested prompts correctly
+- Only the actual command is passed to NL detector and LLM
+- **Result**: Commands like `git add .` are no longer misdetected as natural language
+
+**Files Modified:**
+- `saternal/src/app/input.rs` - Added `strip_shell_prompt()`, modified Enter key handler
 
 **Implementation Details:**
 ```rust
@@ -459,10 +485,12 @@ pub enum UIMessage {
 
 // Rendering pipeline
 1. Terminal content rendered to buffer
-2. UI overlay cells generated from UIMessage
-3. Cells rendered on top of buffer with alpha blending
-4. Combined buffer uploaded to GPU
-5. GPU renders final frame
+2. Get cursor position from focused pane
+3. UI overlay cells generated from UIMessage
+4. Cells positioned 1 line below cursor with 2-column indent
+5. Cells rendered on top of buffer with alpha blending
+6. Combined buffer uploaded to GPU
+7. GPU renders final frame
 ```
 
 **Files Created:**
@@ -472,8 +500,9 @@ pub enum UIMessage {
 - `saternal/src/tab.rs` - Added ui_message field
 - `saternal/src/app/nl_handler.rs` - Set UI state instead of logging
 - `saternal-core/src/renderer/text_rasterizer.rs` - Added overlay_cells()
-- `saternal-core/src/renderer/mod.rs` - Added render_with_panes_and_ui()
+- `saternal-core/src/renderer/mod.rs` - Added render_with_panes_and_ui(), cursor-relative UI positioning
 - `saternal/src/app/window.rs` - Convert UIMessage to UIBox
+- `saternal/src/app/input.rs` - Added strip_shell_prompt(), modified NL detection
 
 ## Future Enhancements
 
