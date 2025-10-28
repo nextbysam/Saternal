@@ -27,6 +27,7 @@ pub struct App {
     pub(super) nl_detector: NLDetector,
     pub(super) nl_tx: mpsc::Sender<super::nl_handler::NLMessage>,
     pub(super) nl_rx: mpsc::Receiver<super::nl_handler::NLMessage>,
+    pub(super) tokio_handle: tokio::runtime::Handle,
 }
 
 impl App {
