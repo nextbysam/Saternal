@@ -133,35 +133,34 @@ fn display_suggestions(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>, comman
     // User types y/n there, and we intercept it in confirmation mode
 }
 
-/// Display error message in terminal
-fn display_error_message(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, error: &str) {
-    let message = format!("\r\n❌ Failed to generate command: {}\r\n", error);
-    write_to_terminal(tab_manager, &message);
-}
-
-/// Helper to write message to active tab's terminal
-fn write_to_terminal(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, message: &str) {
-    let mut tab_mgr = tab_manager.lock();
-    if let Some(tab) = tab_mgr.active_tab_mut() {
-        let _ = tab.write_input(message.as_bytes());
-    }
+/// Log error message (don't write to terminal to avoid shell execution)
+fn display_error_message(_tab_manager: &Arc<Mutex<crate::tab::TabManager>>, error: &str) {
+    log::error!("❌ Failed to generate command: {}", error);
+    // Don't write to PTY stdin - would cause shell to try executing the error message
 }
 
 /// Handle user confirmation response
 /// Reads from tab.confirmation_input buffer
 /// Returns Some(commands) if user confirmed, None if cancelled
+/// Also returns whether to clear the typed confirmation text from terminal
 pub fn handle_confirmation_input(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
-) -> Option<Vec<String>> {
+) -> (Option<Vec<String>>, bool) {
     let mut tab_mgr = tab_manager.lock();
-    let tab = tab_mgr.active_tab_mut()?;
+    let tab = match tab_mgr.active_tab_mut() {
+        Some(t) => t,
+        None => return (None, false),
+    };
 
     // Check if we're in confirmation mode
     if !tab.nl_confirmation_mode {
-        return None;
+        return (None, false);
     }
 
-    let commands = tab.pending_nl_commands.as_ref()?;
+    let commands = match tab.pending_nl_commands.as_ref() {
+        Some(c) => c,
+        None => return (None, false),
+    };
     
     // Determine required confirmation level
     let highest_level = commands
@@ -176,6 +175,7 @@ pub fn handle_confirmation_input(
 
     // Read from confirmation buffer (user's actual input, not from grid)
     let input_lower = tab.confirmation_input.trim().to_lowercase();
+    let input_len = tab.confirmation_input.len();
     
     let should_execute = match highest_level {
         ConfirmationLevel::Standard => {
@@ -192,44 +192,55 @@ pub fn handle_confirmation_input(
         let commands = tab.pending_nl_commands.take().unwrap();
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
-        Some(commands)
+        
+        // Clear the "y" or "yes" they typed using backspaces
+        for _ in 0..input_len {
+            let _ = tab.write_input(b"\x08 \x08"); // backspace, space, backspace
+        }
+        
+        (Some(commands), true)
     } else if input_lower == "n" || input_lower == "no" {
         // User cancelled
         log::info!("✗ User cancelled execution");
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
-        // Clear the input line the user typed
-        let _ = tab.write_input(b"\r\n");
-        None
+        
+        // Clear the "n" or "no" they typed
+        for _ in 0..input_len {
+            let _ = tab.write_input(b"\x08 \x08");
+        }
+        
+        (None, true)
     } else {
         // Not a y/n response - exit confirmation mode and let shell handle it
         log::info!("User entered something else, exiting confirmation mode");
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
-        // Don't clear input - let it pass through to shell
-        None
+        // Don't clear input - let it execute as a normal command
+        (None, false)
     }
 }
 
-/// Execute commands by writing them to PTY
+/// Execute commands by writing them to PTY stdin
 pub fn execute_nl_commands(
     commands: Vec<String>,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
 ) {
     let mut tab_mgr = tab_manager.lock();
     if let Some(tab) = tab_mgr.active_tab_mut() {
-        // Add newline after the "y" confirmation to clear the line
-        let _ = tab.write_input(b"\r\n");
+        log::info!("🚀 Executing {} command(s)...", commands.len());
         
-        // Execute each command (shell will echo them)
+        // Execute each command
         for (i, cmd) in commands.iter().enumerate() {
-            log::info!("✓ Executing command {}: {}", i + 1, cmd);
+            log::info!("  ▶ Command {}: {}", i + 1, cmd);
             
             // Write command to PTY stdin with newline to execute
             let cmd_with_newline = format!("{}\n", cmd);
             if let Err(e) = tab.write_input(cmd_with_newline.as_bytes()) {
-                log::error!("Failed to execute command '{}': {}", cmd, e);
+                log::error!("  ✗ Failed to execute command '{}': {}", cmd, e);
+            } else {
+                log::info!("  ✓ Command sent to shell");
             }
         }
     }
