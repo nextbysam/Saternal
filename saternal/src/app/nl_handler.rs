@@ -123,19 +123,14 @@ fn display_suggestions(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, command
         log::info!("  Command {}: {}", i + 1, cmd);
     }
 
-    // Prompt based on confirmation level
-    match highest_level {
-        ConfirmationLevel::Standard => {
-            message.push_str("Execute? [y/n]: ");
-        }
-        ConfirmationLevel::Sudo => {
-            message.push_str("Execute? Type 'yes' to confirm: ");
-        }
-        ConfirmationLevel::Elevated => {
-            message.push_str("⚠️  Type 'yes' to execute (or 'n' to cancel): ");
-        }
-    }
-
+    // Log the prompt (don't write to terminal to avoid shell execution)
+    let prompt = match highest_level {
+        ConfirmationLevel::Standard => "[Waiting for y/n confirmation]",
+        ConfirmationLevel::Sudo => "[Waiting for 'yes' confirmation (sudo command)]",
+        ConfirmationLevel::Elevated => "[Waiting for 'yes' confirmation (dangerous command)]",
+    };
+    log::info!("{}", prompt);
+    
     write_to_terminal(tab_manager, &message);
 }
 
@@ -155,7 +150,7 @@ fn write_to_terminal(tab_manager: &Arc<Mutex<crate::tab::TabManager>>, message: 
 
 /// Handle user confirmation response
 /// Reads from tab.confirmation_input buffer
-/// Returns Some(commands) if user confirmed, None if cancelled or invalid
+/// Returns Some(commands) if user confirmed, None if cancelled
 pub fn handle_confirmation_input(
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
 ) -> Option<Vec<String>> {
@@ -194,25 +189,26 @@ pub fn handle_confirmation_input(
 
     if should_execute {
         // User confirmed - return commands for execution
+        log::info!("✓ User confirmed execution");
         let commands = tab.pending_nl_commands.take().unwrap();
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
         Some(commands)
     } else if input_lower == "n" || input_lower == "no" {
         // User cancelled
+        log::info!("✗ User cancelled execution");
         tab.pending_nl_commands = None;
         tab.nl_confirmation_mode = false;
         tab.confirmation_input.clear();
-        let _ = tab.write_input(b"\r\nCancelled.\r\n");
+        // Clear the input line the user typed
+        let _ = tab.write_input(b"\r\n");
         None
     } else {
-        // Invalid input - ask again, clear buffer for next attempt
-        tab.confirmation_input.clear();
-        let message = match highest_level {
-            ConfirmationLevel::Standard => "Please type 'y' or 'n': ",
-            _ => "Please type 'yes' or 'n': ",
-        };
-        let _ = tab.write_input(message.as_bytes());
+        // Not a y/n response - exit confirmation mode and let shell handle it
+        log::info!("User entered something else, exiting confirmation mode");
+        tab.pending_nl_commands = None;
+        tab.nl_confirmation_mode = false;
+        // Don't clear input - let it pass through to shell
         None
     }
 }

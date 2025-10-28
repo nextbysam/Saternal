@@ -438,7 +438,7 @@ fn handle_terminal_input(
 }
 
 /// Handle input when in NL confirmation mode
-/// Intercepts text and stores in confirmation buffer instead of passing to PTY
+/// Intercepts text and stores in confirmation buffer
 fn handle_confirmation_mode_input(
     event: &KeyEvent,
     tab_manager: &Arc<Mutex<crate::tab::TabManager>>,
@@ -447,11 +447,44 @@ fn handle_confirmation_mode_input(
 ) -> bool {
     // Handle Enter key - check confirmation
     if matches!(event.logical_key, Key::Named(winit::keyboard::NamedKey::Enter)) {
-        if let Some(commands) = super::nl_handler::handle_confirmation_input(tab_manager) {
-            // User confirmed - execute commands
-            super::nl_handler::execute_nl_commands(commands, tab_manager);
+        // Check what the user typed
+        let input = {
+            let tab_mgr = tab_manager.lock();
+            tab_mgr.active_tab()
+                .map(|t| t.confirmation_input.clone())
+                .unwrap_or_default()
+        };
+        
+        let input_lower = input.trim().to_lowercase();
+        let is_confirmation = input_lower == "y" || input_lower == "yes" 
+            || input_lower == "n" || input_lower == "no";
+        
+        if is_confirmation {
+            // It's a y/n response - handle it
+            if let Some(commands) = super::nl_handler::handle_confirmation_input(tab_manager) {
+                // User confirmed - execute commands
+                super::nl_handler::execute_nl_commands(commands, tab_manager);
+            } else {
+                // User cancelled or exited confirmation mode
+                // Already handled by handle_confirmation_input
+            }
+        } else {
+            // Not a y/n response - pass the entire line to shell
+            // First exit confirmation mode
+            {
+                let mut tab_mgr = tab_manager.lock();
+                if let Some(tab) = tab_mgr.active_tab_mut() {
+                    tab.nl_confirmation_mode = false;
+                    tab.pending_nl_commands = None;
+                    // The input buffer will be passed to shell below
+                }
+            }
+            // Pass Enter to shell (the text was already sent as user typed)
+            if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
+                let _ = active_tab.write_input(b"\n");
+            }
         }
-        // If cancelled or invalid, handle_confirmation_input already displayed message
+        
         window.request_redraw();
         return true;
     }
@@ -461,22 +494,22 @@ fn handle_confirmation_mode_input(
         if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
             if !active_tab.confirmation_input.is_empty() {
                 active_tab.confirmation_input.pop();
-                // Echo backspace to terminal for visual feedback
-                let _ = active_tab.write_input(b"\x08 \x08");
+                // Pass backspace to shell for normal terminal behavior
+                let _ = active_tab.write_input(b"\x7f");
             }
         }
         window.request_redraw();
         return true;
     }
 
-    // Handle regular text input - add to confirmation buffer
+    // Handle regular text input - add to confirmation buffer AND pass to shell
     if let Some(text) = &event.text {
         // Filter out control characters
         let printable: String = text.chars().filter(|c| !c.is_control()).collect();
         if !printable.is_empty() {
             if let Some(active_tab) = tab_manager.lock().active_tab_mut() {
                 active_tab.confirmation_input.push_str(&printable);
-                // Echo to terminal for visual feedback
+                // Pass to shell so it displays normally
                 let _ = active_tab.write_input(printable.as_bytes());
             }
             window.request_redraw();

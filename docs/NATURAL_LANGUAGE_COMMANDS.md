@@ -49,10 +49,9 @@ The terminal will automatically detect the API key and enable natural language c
 ```bash
 $ show me all rust files in this project
 🤖 Generating command with Claude...
-💡 Suggested command:
-  find . -name "*.rs" -type f
-
-Execute? [y/n]: y
+💡 Generated 1 command.
+y    # Type 'y' and press Enter to execute
+find . -name "*.rs" -type f
 ./src/main.rs
 ./saternal-core/src/lib.rs
 ...
@@ -62,11 +61,10 @@ Execute? [y/n]: y
 ```bash
 $ commit all changes with message "Add feature"
 🤖 Generating command with Claude...
-💡 Suggested commands:
-  1. git add .
-  2. git commit -m "Add feature"
-
-Execute? [y/n]: y
+💡 Generated 2 commands.
+y    # Type 'y' and press Enter to execute
+git add .
+git commit -m "Add feature"
 [main abc1234] Add feature
  5 files changed, 120 insertions(+)
 ```
@@ -169,14 +167,25 @@ Once the API responds:
 ### 4. Execution
 
 User types `y`, `yes`, `n`, or `no` and presses Enter:
-- **Yes**: Commands pulled from memory buffer and executed via PTY
-- **No**: Commands and buffer are cleared, memory freed
-- **Invalid input**: Buffer cleared, user prompted again
+- **Yes (`y` or `yes`)**: 
+  - Commands pulled from memory buffer
+  - Newline added to clear confirmation line
+  - Each command executed in order via PTY stdin
+  - Shell echoes and runs each command
+- **No (`n` or `no`)**: 
+  - Commands and buffer are cleared
+  - Memory freed
+  - Newline added to return to prompt
+- **Other input**: 
+  - Exit confirmation mode
+  - Pass the entered text to shell as normal command
 
 After execution or cancellation:
 - Confirmation mode disabled
 - Memory buffers cleared
 - Terminal returns to normal input mode
+
+**Note**: For simplicity, command details are logged but not displayed in the terminal to prevent accidental execution. Check the logs to see what commands will be run before confirming.
 
 ## Architecture
 
