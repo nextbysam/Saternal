@@ -4,6 +4,7 @@ use crate::renderer::color::ansi_to_rgb_with_palette;
 use crate::renderer::theme::ColorPalette;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::Term;
 use anyhow::Result;
 use wgpu;
@@ -25,8 +26,14 @@ struct GlyphInstance {
     /// UV coordinates in atlas
     uv_min: [f32; 2],
     uv_max: [f32; 2],
-    /// Color (RGBA)
+    /// Foreground color (RGBA)
     color: [f32; 4],
+    /// Background color (RGBA)
+    bg_color: [f32; 4],
+    /// Style flags: bit 0 = bold, bit 1 = underline, bit 2 = reverse
+    flags: u32,
+    /// Padding to align to 16 bytes
+    _padding: [u32; 3],
 }
 
 /// Uniform data for screen dimensions
@@ -146,11 +153,23 @@ impl GlyphRenderer {
                             shader_location: 3,
                             format: wgpu::VertexFormat::Float32x2,
                         },
-                        // color
+                        // color (foreground)
                         wgpu::VertexAttribute {
                             offset: 32,
                             shader_location: 4,
                             format: wgpu::VertexFormat::Float32x4,
+                        },
+                        // bg_color (background)
+                        wgpu::VertexAttribute {
+                            offset: 48,
+                            shader_location: 5,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                        // flags (style bits)
+                        wgpu::VertexAttribute {
+                            offset: 64,
+                            shader_location: 6,
+                            format: wgpu::VertexFormat::Uint32,
                         },
                     ],
                 }],
@@ -282,8 +301,28 @@ impl GlyphRenderer {
                     }
                 };
 
-                // Get color from palette
-                let (fg_r, fg_g, fg_b) = ansi_to_rgb_with_palette(&cell.fg, palette);
+                // Extract style flags
+                let is_bold = cell.flags.contains(Flags::BOLD);
+                let is_underline = cell.flags.contains(Flags::UNDERLINE);
+                let is_inverse = cell.flags.contains(Flags::INVERSE);
+                
+                // Get colors from palette
+                let mut fg = ansi_to_rgb_with_palette(&cell.fg, palette);
+                let mut bg = ansi_to_rgb_with_palette(&cell.bg, palette);
+                
+                // Handle reverse video (swap foreground and background)
+                if is_inverse {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+                
+                let (fg_r, fg_g, fg_b) = fg;
+                let (bg_r, bg_g, bg_b) = bg;
+                
+                // Pack style flags into u32
+                let mut flags: u32 = 0;
+                if is_bold { flags |= 0x1; }
+                if is_underline { flags |= 0x2; }
+                if is_inverse { flags |= 0x4; }
 
                 // Calculate pixel position
                 let cell_x = PADDING_LEFT + col_idx as f32 * self.cell_width;
@@ -313,6 +352,14 @@ impl GlyphRenderer {
                         fg_b as f32 / 255.0,
                         1.0,
                     ],
+                    bg_color: [
+                        bg_r as f32 / 255.0,
+                        bg_g as f32 / 255.0,
+                        bg_b as f32 / 255.0,
+                        1.0,
+                    ],
+                    flags,
+                    _padding: [0, 0, 0],
                 });
             }
         }

@@ -22,13 +22,18 @@ struct InstanceInput {
     @location(1) size: vec2<f32>,          // Size in NDC
     @location(2) uv_min: vec2<f32>,        // Atlas UV min
     @location(3) uv_max: vec2<f32>,        // Atlas UV max
-    @location(4) color: vec4<f32>,         // RGBA color
+    @location(4) color: vec4<f32>,         // Foreground RGBA color
+    @location(5) bg_color: vec4<f32>,      // Background RGBA color
+    @location(6) flags: u32,               // Style flags: bit 0=bold, 1=underline, 2=reverse
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) bg_color: vec4<f32>,
+    @location(3) local_uv: vec2<f32>,      // Local UV for underline rendering
+    @location(4) flags: u32,
 }
 
 // Vertex shader - Generate quad vertices procedurally
@@ -77,20 +82,41 @@ fn vs_main(
     // Interpolate UV coordinates in atlas
     output.uv = mix(instance.uv_min, instance.uv_max, local_uv);
     
-    // Pass through color
+    // Pass through colors and flags
     output.color = instance.color;
+    output.bg_color = instance.bg_color;
+    output.local_uv = local_uv;
+    output.flags = instance.flags;
     
     return output;
 }
 
-// Fragment shader - Sample atlas and apply color
+// Fragment shader - Sample atlas and apply color with background and underline
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample glyph coverage from atlas (grayscale)
     let coverage = textureSample(atlas_texture, atlas_sampler, input.uv).r;
     
-    // Premultiply alpha for correct blending
-    let rgb_pre = input.color.rgb * coverage;
+    // Extract style flags
+    let has_underline = (input.flags & 0x2u) != 0u;
     
-    return vec4<f32>(rgb_pre, coverage);
+    // Check if we're in the underline region (bottom 15% of the glyph quad)
+    let is_underline_region = has_underline && input.local_uv.y > 0.85;
+    
+    // Decide which color to use
+    var final_color: vec4<f32>;
+    
+    if is_underline_region {
+        // Render underline using foreground color
+        final_color = input.color;
+    } else if coverage > 0.01 {
+        // Render glyph using foreground color
+        let rgb_pre = input.color.rgb * coverage;
+        final_color = vec4<f32>(rgb_pre, coverage);
+    } else {
+        // Render background where there's no glyph
+        final_color = input.bg_color;
+    }
+    
+    return final_color;
 }
